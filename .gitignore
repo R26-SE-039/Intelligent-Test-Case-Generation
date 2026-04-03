@@ -1,0 +1,23 @@
+# Root level ignores
+node_modules/
+.venv/
+.env
+
+# MacOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Backend ignores
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+.pytest_cache/
+allure-results/
+.coverage
+htmlcov/
