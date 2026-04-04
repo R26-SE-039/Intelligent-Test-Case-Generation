@@ -11,8 +11,7 @@
   },
   "lint-staged": {
     "frontend/**/*.{js,ts,jsx,tsx}": [
-      "eslint --fix",
-      "prettier --write"
+      "pnpm --filter frontend exec eslint --fix"
     ],
     "backend/**/*.py": [
       "ruff check --fix",
