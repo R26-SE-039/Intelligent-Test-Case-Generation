@@ -14,10 +14,10 @@ export default function DashboardLayoutWrapper({
   const sidebarWidth = isOpen ? "256px" : "96px";
 
   return (
-    <div className="flex bg-slate-50 min-h-screen">
+    <div className="flex bg-slate-950 min-h-screen">
       <Sidebar />
       <main
-        className="flex-1 transition-all duration-300 ease-in-out"
+        className="flex-1 transition-all duration-300 ease-in-out overflow-hidden"
         style={{
           marginLeft: sidebarWidth,
         }}

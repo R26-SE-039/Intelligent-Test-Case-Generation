@@ -205,13 +205,43 @@ export default function UserStoryIntakePage() {
         {/* Stats Row */}
         <div className="grid grid-cols-4 gap-4 mb-8">
           {[
-            { label: "Total Stories", value: stats.total, color: "text-purple-400", bg: "bg-purple-500/10 border-purple-500/20" },
-            { label: "Pending", value: stats.pending, color: "text-slate-300", bg: "bg-slate-700/40 border-slate-700" },
-            { label: "Processing", value: stats.processing, color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
-            { label: "Completed", value: stats.done, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
+            {
+              label: "Total Stories",
+              value: stats.total,
+              color: "text-violet-400",
+              bg: "bg-violet-500/10 border-violet-500/30",
+              dot: "bg-violet-400",
+            },
+            {
+              label: "Pending",
+              value: stats.pending,
+              color: "text-slate-200",
+              bg: "bg-slate-800/60 border-slate-700",
+              dot: "bg-slate-400",
+            },
+            {
+              label: "Processing",
+              value: stats.processing,
+              color: "text-sky-400",
+              bg: "bg-sky-500/10 border-sky-500/30",
+              dot: "bg-sky-400",
+            },
+            {
+              label: "Completed",
+              value: stats.done,
+              color: "text-emerald-400",
+              bg: "bg-emerald-500/10 border-emerald-500/30",
+              dot: "bg-emerald-400",
+            },
           ].map((s) => (
-            <div key={s.label} className={`rounded-xl border ${s.bg} p-4`}>
-              <p className="text-xs text-slate-500 font-medium mb-1">{s.label}</p>
+            <div
+              key={s.label}
+              className={`rounded-xl border ${s.bg} p-4 transition-all hover:scale-[1.02]`}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`w-2 h-2 rounded-full ${s.dot}`} />
+                <p className="text-xs text-slate-400 font-medium">{s.label}</p>
+              </div>
               <p className={`text-3xl font-bold ${s.color}`}>{s.value}</p>
             </div>
           ))}

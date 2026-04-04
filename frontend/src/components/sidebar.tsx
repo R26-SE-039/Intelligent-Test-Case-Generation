@@ -68,7 +68,7 @@ export default function Sidebar() {
       <div
         className={`${
           isOpen ? "w-64" : "w-20"
-        } bg-slate-900 text-white h-screen flex flex-col fixed left-0 top-0 shadow-xl transition-all duration-300 ease-in-out z-40`}
+        } bg-slate-900 border-r border-slate-800 text-white h-screen flex flex-col fixed left-0 top-0 transition-all duration-300 ease-in-out z-40`}
       >
         {/* Brand Section */}
         <div
