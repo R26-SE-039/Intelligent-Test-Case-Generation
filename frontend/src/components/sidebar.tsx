@@ -3,16 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart3,
-  Zap,
-  Clock,
-  Smartphone,
-  Shield,
-  Database,
-  Server,
-  AlertTriangle,
-  Scan,
-  BarChartIcon,
+  BookOpen,
+  FileText,
+  Settings2,
+  Code2,
+  PlayCircle,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -23,83 +18,39 @@ interface NavItem {
   label: string;
   icon: React.ReactNode;
   href: string;
+  step: string;
 }
 
-interface NavSection {
-  title: string;
-  items: NavItem[];
-}
-
-const navSections: NavSection[] = [
+const navItems: NavItem[] = [
   {
-    title: "MANAGEMENT",
-    items: [
-      {
-        label: "Test Management",
-        icon: <BarChart3 className="w-5 h-5" />,
-        href: "/dashboard/test-management",
-      },
-      {
-        label: "AI Walkthrough",
-        icon: <Zap className="w-5 h-5" />,
-        href: "/dashboard/ai-walkthrough",
-      },
-      {
-        label: "Test Scheduler",
-        icon: <Clock className="w-5 h-5" />,
-        href: "/dashboard/test-scheduler",
-      },
-    ],
+    label: "User Stories",
+    icon: <BookOpen className="w-5 h-5" />,
+    href: "/dashboard",
+    step: "S1",
   },
   {
-    title: "TESTING",
-    items: [
-      {
-        label: "API Testing",
-        icon: <Server className="w-5 h-5" />,
-        href: "/dashboard/api-testing",
-      },
-      {
-        label: "Database Testing",
-        icon: <Database className="w-5 h-5" />,
-        href: "/dashboard/database-testing",
-      },
-      {
-        label: "Performance",
-        icon: <BarChartIcon className="w-5 h-5" />,
-        href: "/dashboard/performance",
-      },
-      {
-        label: "Load Testing",
-        icon: <BarChartIcon className="w-5 h-5" />,
-        href: "/dashboard/load-testing",
-      },
-      {
-        label: "Mobile & Responsive",
-        icon: <Smartphone className="w-5 h-5" />,
-        href: "/dashboard/mobile-responsive",
-      },
-      {
-        label: "Security Testing",
-        icon: <Shield className="w-5 h-5" />,
-        href: "/dashboard/security-testing",
-      },
-      {
-        label: "SAST Scanner",
-        icon: <Scan className="w-5 h-5" />,
-        href: "/dashboard/sast-scanner",
-      },
-      {
-        label: "Chaos & Resilience",
-        icon: <AlertTriangle className="w-5 h-5" />,
-        href: "/dashboard/chaos-resilience",
-      },
-      {
-        label: "Blockchain Testing",
-        icon: <Zap className="w-5 h-5" />,
-        href: "/dashboard/blockchain-testing",
-      },
-    ],
+    label: "Gherkin Editor",
+    icon: <FileText className="w-5 h-5" />,
+    href: "/dashboard/gherkin-editor",
+    step: "S2",
+  },
+  {
+    label: "Mode & URL Setup",
+    icon: <Settings2 className="w-5 h-5" />,
+    href: "/dashboard/mode-setup",
+    step: "S3",
+  },
+  {
+    label: "Code Review",
+    icon: <Code2 className="w-5 h-5" />,
+    href: "/dashboard/code-review",
+    step: "S4",
+  },
+  {
+    label: "Execution & Report",
+    icon: <PlayCircle className="w-5 h-5" />,
+    href: "/dashboard/execution",
+    step: "S5",
   },
 ];
 
@@ -108,27 +59,36 @@ export default function Sidebar() {
   const { isOpen, setIsOpen } = useSidebar();
 
   const isActive = (href: string) => {
-    return pathname === href || pathname.startsWith(href);
+    if (href === "/dashboard") return pathname === "/dashboard";
+    return pathname.startsWith(href);
   };
 
   return (
     <>
-      {/* Sidebar */}
       <div
         className={`${
-          isOpen ? "w-64" : "w-24"
-        } bg-slate-900 text-white h-screen flex flex-col fixed left-0 top-0 shadow-lg transition-all duration-300 ease-in-out z-40`}
+          isOpen ? "w-64" : "w-20"
+        } bg-slate-900 text-white h-screen flex flex-col fixed left-0 top-0 shadow-xl transition-all duration-300 ease-in-out z-40`}
       >
         {/* Brand Section */}
-        <div className={`py-5 border-b border-slate-700 shrink-0 relative ${isOpen ? "px-4" : "px-0 flex justify-center"}`}>
+        <div
+          className={`py-5 border-b border-slate-700/60 shrink-0 relative ${
+            isOpen ? "px-5" : "px-0 flex justify-center"
+          }`}
+        >
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 bg-linear-to-br from-purple-500 to-blue-500 rounded-xl flex items-center justify-center font-bold text-sm shrink-0">
+            <div className="w-10 h-10 bg-linear-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center font-bold text-lg shrink-0 shadow-lg shadow-purple-500/30">
               ⚡
             </div>
             {isOpen && (
-              <span className="text-xl font-bold whitespace-nowrap">
-                NexGen QA
-              </span>
+              <div className="min-w-0">
+                <span className="text-lg font-bold whitespace-nowrap block leading-tight">
+                  NexGen QA
+                </span>
+                <span className="text-xs text-purple-400 font-medium tracking-wider">
+                  COMPONENT 2
+                </span>
+              </div>
             )}
           </div>
         </div>
@@ -136,79 +96,117 @@ export default function Sidebar() {
         {/* Absolute Toggle Button */}
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="absolute -right-3.5 top-7 h-7 w-7 bg-slate-800 border border-slate-700 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-700 transition-all z-50 shadow-md"
+          className="absolute -right-3.5 top-7 h-7 w-7 bg-slate-800 border border-slate-600 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-purple-600 hover:border-purple-500 transition-all z-50 shadow-md"
           aria-label={isOpen ? "Collapse sidebar" : "Expand sidebar"}
           aria-expanded={isOpen}
         >
           {isOpen ? (
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-3.5 h-3.5" />
           ) : (
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className="w-3.5 h-3.5" />
           )}
         </button>
 
-        {/* Navigation Sections - Custom Scrollbar Hidden */}
-        <nav 
-          className="flex-1 overflow-y-auto px-2 py-6 space-y-8 [&::-webkit-scrollbar]:hidden"
+        {/* Pipeline label */}
+        {isOpen && (
+          <div className="px-5 pt-6 pb-2">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">
+              Pipeline Stages
+            </p>
+          </div>
+        )}
+
+        {/* Navigation */}
+        <nav
+          className="flex-1 overflow-y-auto px-2 py-3 space-y-1"
           style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
         >
-          {navSections.map((section) => (
-            <div key={section.title}>
-              {isOpen && (
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4 px-2">
-                  {section.title}
-                </h3>
-              )}
-              <ul className="space-y-2">
-                {section.items.map((item) => (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      className={`flex items-center w-full min-h-11 ${isOpen ? "gap-3 px-4" : "justify-center px-0"} py-2 rounded-lg transition-all duration-200 ${
-                        isActive(item.href)
-                          ? "bg-purple-600 text-white shadow-md"
-                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
+          {navItems.map((item, index) => {
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={!isOpen ? `${item.step}: ${item.label}` : undefined}
+                className={`group flex items-center w-full min-h-11 ${
+                  isOpen ? "gap-3 px-4" : "justify-center px-0"
+                } py-2.5 rounded-xl transition-all duration-200 relative ${
+                  active
+                    ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                    : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                {/* Step indicator dot */}
+                {isOpen && (
+                  <span
+                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full transition-all duration-200 ${
+                      active ? "bg-purple-300" : "bg-transparent group-hover:bg-slate-600"
+                    }`}
+                  />
+                )}
+                <span className="shrink-0 relative">
+                  {item.icon}
+                  {!isOpen && (
+                    <span
+                      className={`absolute -top-1.5 -right-1.5 text-[9px] font-bold px-1 rounded ${
+                        active
+                          ? "bg-purple-400 text-white"
+                          : "bg-slate-700 text-slate-400"
                       }`}
-                      title={!isOpen ? item.label : undefined}
                     >
-                      <span className="shrink-0">{item.icon}</span>
-                      {isOpen && (
-                        <span className="text-sm font-medium whitespace-nowrap">
-                          {item.label}
-                        </span>
-                      )}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+                      {index + 1}
+                    </span>
+                  )}
+                </span>
+                {isOpen && (
+                  <div className="flex items-center justify-between flex-1 min-w-0">
+                    <span className="text-sm font-medium whitespace-nowrap truncate">
+                      {item.label}
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                        active
+                          ? "bg-purple-500/50 text-purple-200"
+                          : "bg-slate-700/80 text-slate-500 group-hover:bg-slate-700 group-hover:text-slate-400"
+                      }`}
+                    >
+                      {item.step}
+                    </span>
+                  </div>
+                )}
+              </Link>
+            );
+          })}
         </nav>
 
         {/* User Section */}
-        <div className="p-4 border-t border-slate-700 shrink-0">
+        <div className="p-3 border-t border-slate-700/60 shrink-0">
           <div
-            className={`flex items-center ${isOpen ? "gap-3 px-4" : "justify-center px-0"} py-3 rounded-lg bg-slate-800 mb-3`}
+            className={`flex items-center ${
+              isOpen ? "gap-3 px-3" : "justify-center px-0"
+            } py-2.5 rounded-xl bg-slate-800/60 mb-2`}
           >
-            <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-xs font-bold shrink-0">
-              F
+            <div className="w-8 h-8 rounded-full bg-linear-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-xs font-bold shrink-0">
+              D
             </div>
             {isOpen && (
               <div className="min-w-0">
                 <span className="text-sm font-medium block truncate">
-                  Feroz
+                  Dasun T
                 </span>
                 <span className="text-xs text-slate-400 block truncate">
-                  ENTERPRISE
+                  IT22303684
                 </span>
               </div>
             )}
           </div>
           <button
-            className={`w-full flex items-center ${isOpen ? "gap-3 px-4 justify-start" : "justify-center px-0"} py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-all duration-200`}
+            className={`w-full flex items-center ${
+              isOpen ? "gap-3 px-3 justify-start" : "justify-center px-0"
+            } py-2 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition-all duration-200`}
             title="Sign Out"
           >
-            <LogOut className="w-5 h-5 shrink-0" />
+            <LogOut className="w-4 h-4 shrink-0" />
             {isOpen && (
               <span className="text-sm font-medium whitespace-nowrap">
                 Sign Out
