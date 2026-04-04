@@ -85,9 +85,7 @@ export default function Sidebar() {
                 <span className="text-lg font-bold whitespace-nowrap block leading-tight">
                   NexGen QA
                 </span>
-                <span className="text-xs text-purple-400 font-medium tracking-wider">
-                  COMPONENT 2
-                </span>
+             
               </div>
             )}
           </div>

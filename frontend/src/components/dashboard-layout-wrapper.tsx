@@ -17,12 +17,12 @@ export default function DashboardLayoutWrapper({
     <div className="flex bg-slate-950 min-h-screen">
       <Sidebar />
       <main
-        className="flex-1 transition-all duration-300 ease-in-out overflow-hidden"
+        className="flex-1 transition-all duration-300 ease-in-out overflow-y-auto h-screen"
         style={{
           marginLeft: sidebarWidth,
         }}
       >
-        <div className="min-h-screen">{children}</div>
+        <div className="min-h-screen ">{children}</div>
       </main>
     </div>
   );
