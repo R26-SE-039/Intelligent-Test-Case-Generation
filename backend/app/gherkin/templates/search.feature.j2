@@ -1,0 +1,21 @@
+Feature: {{ feature_name }}
+  As a {{ actor }}
+  I want to {{ action }}
+  So that I can {{ goal }}
+
+  Scenario: Search returns relevant results
+    Given I am on the products page
+    When I search for "backpack"
+    Then I should see products related to "backpack"
+    And each result should match the search term
+
+  Scenario: Search with no results shows empty state
+    Given I am on the products page
+    When I search for "xyznonexistent123"
+    Then I should see "No products found"
+    And I should see a suggestion to refine my search
+
+  Scenario: Filters work correctly with search
+    Given I have searched for "sauce labs"
+    When I apply the "Price (low to high)" filter
+    Then the results should be sorted by price ascending

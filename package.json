@@ -11,11 +11,11 @@
   },
   "lint-staged": {
     "frontend/**/*.{js,ts,jsx,tsx}": [
-      "pnpm --filter frontend exec eslint --fix"
+      "pnpm --filter frontend exec next lint --fix --file"
     ],
     "backend/**/*.py": [
-      "ruff check --fix",
-      "ruff format"
+      "backend/.venv/Scripts/ruff check --fix",
+      "backend/.venv/Scripts/ruff format"
     ]
   }
 }

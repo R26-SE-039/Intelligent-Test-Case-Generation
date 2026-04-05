@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import DashboardLayoutWrapper from "@/components/dashboard-layout-wrapper";
+import { listStories, getGherkinForStory, updateGherkin, approveGherkin, regenerateGherkin } from "@/lib/api";
+import { useProject } from "@/lib/project-context";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
   FileText,
@@ -12,105 +15,92 @@ import {
   Info,
   Copy,
   Check,
+  Loader2,
+  AlertCircle,
+  Cpu,
+  RefreshCw,
+  FolderOpen,
 } from "lucide-react";
 import Link from "next/link";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
 interface GherkinStory {
-  id: string;
+  id: string;           // story id e.g. "US-001"
+  gherkinId: string;    // UUID from gherkin_scenarios table
   title: string;
-  actor: string;
   content: string;
   edited: boolean;
+  generator: string;
+  approved: boolean;    // from DB — persists on refresh ✅
 }
 
-const gherkinData: GherkinStory[] = [
-  {
-    id: "US-001",
-    title: "User Authentication",
-    actor: "registered customer",
-    edited: false,
-    content: `Feature: User Authentication
-  As a registered customer
-  I want to log in to the system
-  So that I can access my order history
-
-  Scenario: Successful login with valid credentials
-    Given I am on the login page
-    When I enter valid username "standard_user"
-    And I enter valid password "secret_sauce"
-    And I click the login button
-    Then I should be redirected to the products page
-    And I should see my account dashboard
-
-  Scenario: Failed login with invalid credentials
-    Given I am on the login page
-    When I enter invalid username "wrong_user"
-    And I enter invalid password "wrong_pass"
-    And I click the login button
-    Then I should see an error message "Epic sadface: Username and password do not match"
-    And I should remain on the login page`,
-  },
-  {
-    id: "US-002",
-    title: "Shopping Cart",
-    actor: "shopper",
-    edited: false,
-    content: `Feature: Shopping Cart Management
-  As a shopper
-  I want to add items to the shopping cart
-  So that I can purchase multiple products in one transaction
-
-  Scenario: Add item to cart
-    Given I am on the products page
-    When I click "Add to cart" on "Sauce Labs Backpack"
-    Then the cart badge should show "1"
-    And the button label should change to "Remove"
-
-  Scenario: Remove item from cart
-    Given I have "Sauce Labs Backpack" in my cart
-    When I click "Remove" on that item
-    Then the cart badge should show "0"
-    And the item should no longer be in the cart`,
-  },
-  {
-    id: "US-003",
-    title: "Checkout Process",
-    actor: "registered customer",
-    edited: false,
-    content: `Feature: Checkout Process
-  As a registered customer
-  I want to complete the checkout process
-  So that I can receive order confirmation
-
-  Scenario: Successful checkout
-    Given I have items in my cart
-    When I proceed to checkout
-    And I fill in first name "John"
-    And I fill in last name "Doe"
-    And I fill in postal code "12345"
-    And I click Continue
-    Then I should see the order summary
-    When I click Finish
-    Then I should see "Thank you for your order!"
-
-  Scenario: Checkout with missing information
-    Given I have items in my cart
-    When I proceed to checkout
-    And I leave the first name empty
-    And I click Continue
-    Then I should see error "First Name is required"`,
-  },
-];
-
 export default function GherkinEditorPage() {
-  const [stories, setStories] = useState<GherkinStory[]>(gherkinData);
-  const [activeId, setActiveId] = useState(gherkinData[0].id);
-  const [copied, setCopied] = useState(false);
-  const [approved, setApproved] = useState<Set<string>>(new Set());
+  const router = useRouter();
+  const { activeProject } = useProject();
 
-  const activeStory = stories.find((s) => s.id === activeId)!;
+  const [stories, setStories] = useState<GherkinStory[]>([]);
+  const [activeId, setActiveId] = useState<string>("");
+  const [copied, setCopied] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Redirect if no project
+  useEffect(() => {
+    if (!activeProject) {
+      router.replace("/projects");
+    }
+  }, [activeProject, router]);
+
+  const loadGherkin = useCallback(async () => {
+    if (!activeProject) return;
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Load all stories for the project
+      const storyList = await listStories(activeProject.id);
+
+      const loaded: GherkinStory[] = [];
+      for (const s of storyList) {
+        const gherkin = await getGherkinForStory(activeProject.id, s.id);
+        if (gherkin) {
+          loaded.push({
+            id: s.id,
+            gherkinId: gherkin.id,
+            title: gherkin.feature_name,
+            content: gherkin.gherkin_text,
+            edited: gherkin.edited_by_qa,
+            generator: gherkin.generator,
+            approved: gherkin.approved,  // persisted from DB ✅
+          });
+        }
+      }
+
+      if (loaded.length > 0) {
+        setStories(loaded);
+        setActiveId(loaded[0].id);
+      } else {
+        setError("No Gherkin scenarios found. Go back and generate some first.");
+      }
+    } catch (err) {
+      console.error("Failed to load Gherkin:", err);
+      setError("Could not load Gherkin from backend. Is the server running?");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [activeProject]);
+
+  useEffect(() => {
+    loadGherkin();
+  }, [loadGherkin]);
+
+  if (!activeProject) return null;
+
+  const activeStory = stories.find((s) => s.id === activeId);
 
   const handleChange = (value: string | undefined) => {
     setStories((prev) =>
@@ -120,19 +110,80 @@ export default function GherkinEditorPage() {
     );
   };
 
+  /** Save QA edits back to PostgreSQL */
+  const handleSave = async () => {
+    if (!activeStory || !activeStory.gherkinId) return;
+    setIsSaving(true);
+    try {
+      await updateGherkin(activeStory.gherkinId, activeStory.content);
+      setStories((prev) =>
+        prev.map((s) => (s.id === activeId ? { ...s, edited: false } : s))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  /** Toggle approval — persists to DB */
+  const handleApprove = async () => {
+    if (!activeStory?.gherkinId) return;
+    setIsApproving(true);
+    try {
+      const result = await approveGherkin(activeStory.gherkinId);
+      setStories((prev) =>
+        prev.map((s) => (s.id === activeId ? { ...s, approved: result.approved } : s))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Approve failed");
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  /** Force-regenerate Gherkin (ignores edited_by_qa flag) */
+  const handleRegenerate = async () => {
+    if (!activeStory) return;
+    setIsRegenerating(true);
+    try {
+      const result = await regenerateGherkin(activeProject.id, activeStory.id);
+      setStories((prev) =>
+        prev.map((s) =>
+          s.id === activeId
+            ? { ...s, content: result.gherkin_text, generator: result.generator, edited: false, approved: false }
+            : s
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Regenerate failed");
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   const handleCopy = async () => {
+    if (!activeStory) return;
     await navigator.clipboard.writeText(activeStory.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleApprove = () => {
-    setApproved((prev) => {
-      const next = new Set(prev);
-      next.add(activeId);
-      return next;
-    });
-  };
+  const approvedCount = stories.filter((s) => s.approved).length;
+
+  if (isLoading) {
+    return (
+      <DashboardLayoutWrapper>
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-center">
+            <Loader2 className="w-10 h-10 text-purple-400 animate-spin mx-auto mb-4" />
+            <p className="text-slate-300 font-medium">Loading Gherkin scenarios…</p>
+            <p className="text-slate-500 text-sm mt-1">Fetching from database</p>
+          </div>
+        </div>
+      </DashboardLayoutWrapper>
+    );
+  }
 
   return (
     <DashboardLayoutWrapper>
@@ -145,6 +196,14 @@ export default function GherkinEditorPage() {
                 S2
               </span>
               <span className="text-xs text-slate-500">Pipeline Stage 2 of 5</span>
+              <span className="text-slate-700 mx-1">·</span>
+              <Link
+                href="/projects"
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-purple-400 transition-colors"
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                {activeProject.name}
+              </Link>
             </div>
             <h1 className="text-2xl font-bold text-white">Gherkin Editor</h1>
             <p className="text-slate-400 text-sm mt-0.5">
@@ -170,134 +229,196 @@ export default function GherkinEditorPage() {
         </div>
       </div>
 
+      {/* Error banner */}
+      {error && (
+        <div className="mx-8 mt-4 flex items-start gap-3 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+          <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+          <p className="text-sm text-red-300">{error}</p>
+          <button onClick={() => setError(null)} className="ml-auto text-slate-400 hover:text-white">✕</button>
+        </div>
+      )}
+
       {/* Human-in-the-loop info banner */}
       <div className="mx-8 mt-6 flex items-start gap-3 px-4 py-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
         <Info className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
         <p className="text-sm text-blue-300">
-          <span className="font-semibold">Human-in-the-loop:</span> You can edit these
-          Gherkin scenarios before generating code. Changes are saved automatically. Approve
-          each scenario when satisfied.
+          <span className="font-semibold">Human-in-the-loop:</span> Edit Gherkin scenarios before
+          generating code. Save changes to PostgreSQL. Approve each scenario when satisfied — approvals
+          persist across sessions.
         </p>
       </div>
 
+      {/* Empty state */}
+      {stories.length === 0 && !isLoading && (
+        <div className="flex flex-col items-center justify-center py-20">
+          <FileText className="w-12 h-12 text-slate-600 mb-4" />
+          <h3 className="text-base font-semibold text-white mb-2">No Gherkin Scenarios</h3>
+          <p className="text-sm text-slate-400 mb-5">
+            Go back to User Stories and generate Gherkin first.
+          </p>
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-medium transition-all"
+          >
+            <ChevronLeft className="w-4 h-4" /> Back to Stories
+          </Link>
+        </div>
+      )}
+
       {/* Main editor layout */}
-      <div className="flex gap-0 h-[calc(100vh-230px)] mx-8 mt-6 mb-8 rounded-xl border border-slate-700 overflow-hidden">
-        {/* Left panel — story list */}
-        <div className="w-60 shrink-0 bg-slate-900 border-r border-slate-700 flex flex-col">
-          <div className="px-4 py-3 border-b border-slate-700">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">
-              Stories ({stories.length})
-            </p>
-          </div>
-          <div className="flex-1 overflow-y-auto py-2" style={{ scrollbarWidth: "none" }}>
-            {stories.map((story) => {
-              const isActive = story.id === activeId;
-              const isApproved = approved.has(story.id);
-              return (
-                <button
-                  key={story.id}
-                  onClick={() => setActiveId(story.id)}
-                  className={`w-full text-left px-4 py-3 transition-all border-l-2 ${
-                    isActive
-                      ? "border-purple-500 bg-purple-500/10 text-white"
-                      : "border-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-mono text-purple-400">{story.id}</span>
-                    <div className="flex items-center gap-1">
-                      {story.edited && (
-                        <Edit3 className="w-3 h-3 text-amber-400" />
-                      )}
-                      {isApproved && (
-                        <CheckCircle className="w-3 h-3 text-emerald-400" />
-                      )}
-                    </div>
-                  </div>
-                  <p className="text-xs font-medium leading-tight">{story.title}</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5 truncate">
-                    as {story.actor}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Right panel — Monaco editor */}
-        <div className="flex-1 flex flex-col bg-slate-950">
-          {/* Editor toolbar */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-700 bg-slate-900/50">
-            <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4 text-purple-400" />
-              <span className="text-sm font-medium text-slate-200">
-                {activeStory.title}.feature
+      {stories.length > 0 && (
+        <div className="flex gap-0 h-[calc(100vh-280px)] mx-8 mt-6 mb-8 rounded-xl border border-slate-700 overflow-hidden">
+          {/* Left panel — story list */}
+          <div className="w-64 shrink-0 bg-slate-900 border-r border-slate-700 flex flex-col">
+            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">
+                Stories ({stories.length})
+              </p>
+              <span className="text-[10px] text-emerald-400 font-semibold">
+                {approvedCount}/{stories.length} approved
               </span>
-              {activeStory.edited && (
-                <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded">
-                  MODIFIED
-                </span>
-              )}
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleCopy}
-                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors px-2.5 py-1.5 rounded-md hover:bg-slate-700"
-              >
-                {copied ? (
-                  <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copied</>
-                ) : (
-                  <><Copy className="w-3.5 h-3.5" /> Copy</>
-                )}
-              </button>
-              <button
-                onClick={handleApprove}
-                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md font-medium transition-all ${
-                  approved.has(activeId)
-                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                    : "bg-purple-600 hover:bg-purple-500 text-white"
-                }`}
-              >
-                <CheckCircle className="w-3.5 h-3.5" />
-                {approved.has(activeId) ? "Approved" : "Approve"}
-              </button>
+            <div className="flex-1 overflow-y-auto py-2" style={{ scrollbarWidth: "none" }}>
+              {stories.map((story) => {
+                const isActive = story.id === activeId;
+                return (
+                  <button
+                    key={story.id}
+                    onClick={() => setActiveId(story.id)}
+                    className={`w-full text-left px-4 py-3 transition-all border-l-2 ${
+                      isActive
+                        ? "border-purple-500 bg-purple-500/10 text-white"
+                        : "border-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-mono text-purple-400">{story.id}</span>
+                      <div className="flex items-center gap-1">
+                        {story.generator === "llm" && <Cpu className="w-3 h-3 text-indigo-400" />}
+                        {story.edited && <Edit3 className="w-3 h-3 text-amber-400" />}
+                        {story.approved && <CheckCircle className="w-3 h-3 text-emerald-400" />}
+                      </div>
+                    </div>
+                    <p className="text-xs font-medium leading-tight">{story.title}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5 capitalize">
+                      {story.generator === "llm" ? "🤖 LLM" : "⚙️ Jinja2"}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Monaco */}
-          <div className="flex-1">
-            <MonacoEditor
-              height="100%"
-              defaultLanguage="gherkin"
-              language="plaintext"
-              theme="vs-dark"
-              value={activeStory.content}
-              onChange={handleChange}
-              options={{
-                fontSize: 13,
-                lineHeight: 22,
-                minimap: { enabled: false },
-                wordWrap: "on",
-                scrollBeyondLastLine: false,
-                padding: { top: 16, bottom: 16 },
-                fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-                fontLigatures: true,
-              }}
-            />
-          </div>
+          {/* Right panel — Monaco editor */}
+          {activeStory && (
+            <div className="flex-1 flex flex-col bg-slate-950">
+              {/* Editor toolbar */}
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-700 bg-slate-900/50">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-purple-400" />
+                  <span className="text-sm font-medium text-slate-200">
+                    {activeStory.title}.feature
+                  </span>
+                  {activeStory.edited && (
+                    <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded">
+                      UNSAVED
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Regenerate */}
+                  <button
+                    onClick={handleRegenerate}
+                    disabled={isRegenerating}
+                    title="Force regenerate (overwrites edits)"
+                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-300 px-2.5 py-1.5 rounded-md hover:bg-slate-700 transition-all disabled:opacity-50"
+                  >
+                    {isRegenerating ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    )}
+                    Regenerate
+                  </button>
 
-          {/* Bottom status bar */}
-          <div className="flex items-center justify-between px-4 py-2 border-t border-slate-700 bg-slate-900/50">
-            <div className="flex items-center gap-4 text-[11px] text-slate-500">
-              <span>{activeStory.content.split("\n").length} lines</span>
-              <span>Gherkin · Given/When/Then</span>
+                  {/* Save to DB */}
+                  {activeStory.edited && activeStory.gherkinId && (
+                    <button
+                      onClick={handleSave}
+                      disabled={isSaving}
+                      className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 px-2.5 py-1.5 rounded-md hover:bg-slate-700 transition-all"
+                    >
+                      {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                      Save to DB
+                    </button>
+                  )}
+
+                  {/* Copy */}
+                  <button
+                    onClick={handleCopy}
+                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors px-2.5 py-1.5 rounded-md hover:bg-slate-700"
+                  >
+                    {copied ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copied</> : <><Copy className="w-3.5 h-3.5" /> Copy</>}
+                  </button>
+
+                  {/* Approve — persists to DB */}
+                  <button
+                    onClick={handleApprove}
+                    disabled={isApproving}
+                    className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md font-medium transition-all disabled:opacity-50 ${
+                      activeStory.approved
+                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                        : "bg-purple-600 hover:bg-purple-500 text-white"
+                    }`}
+                  >
+                    {isApproving ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle className="w-3.5 h-3.5" />
+                    )}
+                    {activeStory.approved ? "Approved ✓" : "Approve"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Monaco */}
+              <div className="flex-1">
+                <MonacoEditor
+                  height="100%"
+                  language="plaintext"
+                  theme="vs-dark"
+                  value={activeStory.content}
+                  onChange={handleChange}
+                  options={{
+                    fontSize: 13,
+                    lineHeight: 22,
+                    minimap: { enabled: false },
+                    wordWrap: "on",
+                    scrollBeyondLastLine: false,
+                    padding: { top: 16, bottom: 16 },
+                    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+                    fontLigatures: true,
+                  }}
+                />
+              </div>
+
+              {/* Bottom status bar */}
+              <div className="flex items-center justify-between px-4 py-2 border-t border-slate-700 bg-slate-900/50">
+                <div className="flex items-center gap-4 text-[11px] text-slate-500">
+                  <span>{activeStory.content.split("\n").length} lines</span>
+                  <span>Gherkin · Given/When/Then</span>
+                  <span className="capitalize">
+                    Generator: <span className="text-purple-400">{activeStory.generator}</span>
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {approvedCount}/{stories.length} approved
+                </div>
+              </div>
             </div>
-            <div className="text-[11px] text-slate-500">
-              {approved.size}/{stories.length} approved
-            </div>
-          </div>
+          )}
         </div>
-      </div>
+      )}
     </DashboardLayoutWrapper>
   );
 }

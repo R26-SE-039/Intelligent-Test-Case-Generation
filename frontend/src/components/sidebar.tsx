@@ -11,8 +11,10 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  FolderOpen,
 } from "lucide-react";
 import { useSidebar } from "@/lib/sidebar-context";
+import { useProject } from "@/lib/project-context";
 
 interface NavItem {
   label: string;
@@ -57,6 +59,7 @@ const navItems: NavItem[] = [
 export default function Sidebar() {
   const pathname = usePathname();
   const { isOpen, setIsOpen } = useSidebar();
+  const { activeProject } = useProject();
 
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard";
@@ -85,7 +88,6 @@ export default function Sidebar() {
                 <span className="text-lg font-bold whitespace-nowrap block leading-tight">
                   NexGen QA
                 </span>
-             
               </div>
             )}
           </div>
@@ -105,13 +107,27 @@ export default function Sidebar() {
           )}
         </button>
 
-        {/* Pipeline label */}
-        {isOpen && (
-          <div className="px-5 pt-6 pb-2">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">
-              Pipeline Stages
-            </p>
-          </div>
+        {/* Active project indicator */}
+        {isOpen && activeProject && (
+          <Link
+            href="/projects"
+            className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 transition-all group"
+          >
+            <FolderOpen className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Active Project</p>
+              <p className="text-xs text-purple-300 font-medium truncate">{activeProject.name}</p>
+            </div>
+          </Link>
+        )}
+        {!isOpen && activeProject && (
+          <Link
+            href="/projects"
+            className="mx-2 mt-3 flex justify-center p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 transition-all"
+            title={`Project: ${activeProject.name} — Switch`}
+          >
+            <FolderOpen className="w-4 h-4 text-purple-400" />
+          </Link>
         )}
 
         {/* Navigation */}

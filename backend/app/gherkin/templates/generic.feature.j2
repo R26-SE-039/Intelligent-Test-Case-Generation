@@ -1,0 +1,23 @@
+Feature: {{ feature_name }}
+  As a {{ actor }}
+  I want to {{ action }}
+  So that I can {{ goal }}
+
+{% for criterion in acceptance_criteria %}
+  Scenario: {{ criterion }}
+    Given I am on the relevant page
+    When I perform the action as a {{ actor }}
+    Then {{ criterion | lower }}
+{% endfor %}
+
+  Scenario: Happy path — {{ action }}
+    Given I am authenticated as a {{ actor }}
+    When I {{ action }}
+    Then I should achieve "{{ goal }}"
+    And no errors should occur
+
+  Scenario: Error handling — {{ action }} fails
+    Given I am authenticated as a {{ actor }}
+    When {{ action }} encounters an error
+    Then I should see a meaningful error message
+    And I should be able to retry the action

@@ -1,0 +1,29 @@
+Feature: {{ feature_name }}
+  As a {{ actor }}
+  I want to {{ action }}
+  So that I can {{ goal }}
+
+  Scenario: Successful checkout with all details
+    Given I have items in my cart
+    When I proceed to checkout
+    And I fill in first name "John"
+    And I fill in last name "Doe"
+    And I fill in postal code "12345"
+    And I click Continue
+    Then I should see the order summary
+    When I click Finish
+    Then I should see "Thank you for your order!"
+
+  Scenario: Checkout with missing information
+    Given I have items in my cart
+    When I proceed to checkout
+    And I leave the first name empty
+    And I click Continue
+    Then I should see error "First Name is required"
+    And I should remain on the checkout information page
+
+  Scenario: Checkout total is correct
+    Given I have "Sauce Labs Backpack" in my cart at "$29.99"
+    When I proceed to checkout and view the order summary
+    Then the item total should show "$29.99"
+    And the tax should be calculated correctly

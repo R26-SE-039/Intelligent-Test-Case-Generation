@@ -1,0 +1,26 @@
+Feature: {{ feature_name }}
+  As a {{ actor }}
+  I want to {{ action }}
+  So that I can {{ goal }}
+
+  Scenario: Successful login with valid credentials
+    Given I am on the login page
+    When I enter valid username "standard_user"
+    And I enter valid password "secret_sauce"
+    And I click the login button
+    Then I should be redirected to the products page
+    And I should see my account dashboard
+
+  Scenario: Failed login with invalid credentials
+    Given I am on the login page
+    When I enter invalid username "wrong_user"
+    And I enter invalid password "wrong_pass"
+    And I click the login button
+    Then I should see an error message "Epic sadface: Username and password do not match"
+    And I should remain on the login page
+
+  Scenario: Session persists across page refresh
+    Given I am logged in as "standard_user"
+    When I refresh the browser page
+    Then I should still be on the products page
+    And my session should be active
