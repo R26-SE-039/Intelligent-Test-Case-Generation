@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import DashboardLayoutWrapper from "@/components/dashboard-layout-wrapper";
 import dynamic from "next/dynamic";
 import {
@@ -264,10 +265,36 @@ const domElements = [
   { selector: ".shopping_cart_badge", tag: "SPAN", step: "verify cart count" },
 ];
 
-export default function CodeReviewPage() {
-  const [activeFramework, setActiveFramework] = useState<Framework>("playwright");
+function CodeReviewContent() {
+  const searchParams = useSearchParams();
+  const modeParam = searchParams.get("mode") || "dom";
+  const fwParam = (searchParams.get("framework") as Framework) || "playwright";
+  const urlParam = searchParams.get("url") || "https://www.saucedemo.com";
+
+  const [activeFramework, setActiveFramework] = useState<Framework>(fwParam);
   const [codeMap, setCodeMap] = useState(codeSnippets);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (urlParam !== "https://www.saucedemo.com" || modeParam === "abstract") {
+      const updatedCodeMap = JSON.parse(JSON.stringify(codeSnippets)); // Deep copy
+      for (const key in updatedCodeMap) {
+        const fw = key as Framework;
+        let newCode = updatedCodeMap[fw].code;
+        
+        // Update URL
+        newCode = newCode.replace(/https:\/\/www\.saucedemo\.com/g, urlParam);
+        
+        // Update Mode text in comments
+        if (modeParam === "abstract") {
+          newCode = newCode.replace(/Mode B \(DOM-Aware\)/g, "Mode A (Abstract)");
+        }
+        
+        updatedCodeMap[fw].code = newCode;
+      }
+      setCodeMap(updatedCodeMap);
+    }
+  }, [urlParam, modeParam]);
 
   const active = codeMap[activeFramework];
 
@@ -306,7 +333,7 @@ export default function CodeReviewPage() {
             </div>
             <h1 className="text-2xl font-bold text-slate-900">Code Review</h1>
             <p className="text-slate-600 text-sm mt-0.5">
-              Review and edit generated test code · Mode B DOM-Aware · SauceDemo
+              Review and edit generated test code · Mode {modeParam === "dom" ? "B DOM-Aware" : "A Abstract"} · {urlParam}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -373,7 +400,7 @@ export default function CodeReviewPage() {
           <div className="px-4 py-1.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
             <span className="text-[11px] text-slate-500 font-mono">{active.filename}</span>
             <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">
-              Mode B · DOM-Aware
+              Mode {modeParam === "dom" ? "B · DOM-Aware" : "A · Abstract"}
             </span>
           </div>
 
@@ -452,5 +479,13 @@ export default function CodeReviewPage() {
         </div>
       </div>
     </DashboardLayoutWrapper>
+  );
+}
+
+export default function CodeReviewPage() {
+  return (
+    <Suspense fallback={<div className="p-8">Loading Code Review...</div>}>
+      <CodeReviewContent />
+    </Suspense>
   );
 }

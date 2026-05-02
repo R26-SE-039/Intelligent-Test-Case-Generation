@@ -1,21 +1,5 @@
 {
   "name": "intelligent-test-case-generation",
   "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "prepare": "husky install"
-  },
-  "devDependencies": {
-    "husky": "^8.0.3",
-    "lint-staged": "^15.2.2"
-  },
-  "lint-staged": {
-    "frontend/**/*.{js,ts,jsx,tsx}": [
-      "node scripts/lint-frontend.js"
-    ],
-    "backend/**/*.py": [
-      "backend/.venv/Scripts/ruff check --fix",
-      "backend/.venv/Scripts/ruff format"
-    ]
-  }
+  "private": true
 }

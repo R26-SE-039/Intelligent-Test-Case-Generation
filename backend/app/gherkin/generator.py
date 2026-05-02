@@ -112,16 +112,17 @@ def generate_with_jinja2(story: dict) -> str:
 
 # ─── LLM plugin slot ──────────────────────────────────────────────────────────
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "none").lower()  # "openai" | "ollama" | "none"
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "none").lower()  # "openai" | "ollama" | "gemini" | "none"
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-1.5-flash")
 
 
 async def generate_with_llm(story: dict) -> Optional[str]:
     """
     Generate Gherkin using an LLM provider.
-    Currently supported: openai, ollama (local CodeLlama/Mistral).
+    Currently supported: openai, ollama, gemini.
 
     Set environment variables:
+      LLM_PROVIDER=gemini    LLM_API_KEY=...
       LLM_PROVIDER=openai    LLM_API_KEY=sk-...
       LLM_PROVIDER=ollama    LLM_BASE_URL=http://localhost:11434
 
@@ -130,24 +131,36 @@ async def generate_with_llm(story: dict) -> Optional[str]:
     if LLM_PROVIDER == "none":
         return None
 
-    prompt = _build_llm_prompt(story)
+    template_name = _detect_template(story)
+    prompt = _build_llm_prompt(story, template_name)
 
     if LLM_PROVIDER == "openai":
         return await _call_openai(prompt)
     elif LLM_PROVIDER == "ollama":
         return await _call_ollama(prompt)
+    elif LLM_PROVIDER == "gemini":
+        return await _call_gemini(prompt)
     else:
         return None
 
 
-def _build_llm_prompt(story: dict) -> str:
-    """Build the LLM prompt for Gherkin generation."""
+
+def _build_llm_prompt(story: dict, template_name: str) -> str:
+    """Build the LLM prompt for Gherkin generation with RAG context."""
     criteria = _parse_acceptance_criteria(story.get("acceptance_criteria", "[]"))
     criteria_text = "\n".join(f"  - {c}" for c in criteria)
 
+    rag_context = ""
+    try:
+        template_path = TEMPLATES_DIR / template_name
+        if template_path.exists():
+            rag_context = f"\nReference Template (use this structure/style as a guide):\n```gherkin\n{template_path.read_text()}\n```\n"
+    except Exception:
+        pass
+
     return f"""You are a QA expert. Generate a complete Gherkin feature file for the following user story.
 Use proper Given/When/Then syntax. Include at least 2 scenarios: a happy path and an error/negative path.
-
+{rag_context}
 User Story:
   Actor: {story.get('actor')}
   Action: {story.get('action')}
@@ -157,7 +170,7 @@ User Story:
 {criteria_text}
 
 Target application: SauceDemo (https://www.saucedemo.com)
-Return ONLY the Gherkin feature file content, nothing else.
+Return ONLY the Gherkin feature file content, nothing else. Do not wrap in markdown tags if possible.
 """
 
 
@@ -204,6 +217,33 @@ async def _call_ollama(prompt: str) -> Optional[str]:
             return resp.json().get("response", "").strip()
     except Exception:
         return None  # Fall back to Jinja2
+
+
+async def _call_gemini(prompt: str) -> Optional[str]:
+    """Call Google Gemini API for Gherkin generation."""
+    try:
+        import google.generativeai as genai
+        api_key = os.getenv("LLM_API_KEY", "")
+        if not api_key:
+            return None
+        
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(LLM_MODEL)
+        response = await model.generate_content_async(prompt)
+        text = response.text.strip()
+        
+        # Clean up markdown tags if present
+        if text.startswith("```gherkin"):
+            text = text[10:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+            
+        return text.strip()
+    except Exception as e:
+        print(f"Gemini generation error: {e}")
+        return None
 
 
 # ─── Main public function ─────────────────────────────────────────────────────
