@@ -125,18 +125,18 @@ export default function ProjectsPage() {
   return (
     <DashboardLayoutWrapper>
       {/* Page Header */}
-      <div className="sticky top-0 z-10 bg-slate-950/80 backdrop-blur-sm border-b border-slate-800 px-8 py-5">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-sm border-b border-slate-200 px-8 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white">Projects</h1>
-            <p className="text-slate-400 text-sm mt-0.5">
+            <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
+            <p className="text-slate-600 text-sm mt-0.5">
               Each project is an isolated workspace with its own stories, Gherkin scenarios and test results
             </p>
           </div>
           <button
             id="btn-new-project"
             onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-semibold text-sm transition-all shadow-lg shadow-purple-600/30 hover:shadow-purple-500/40 hover:scale-[1.02]"
+            className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold text-sm transition-all shadow-lg shadow-purple-600/30 hover:shadow-purple-700/40 hover:scale-[1.02]"
           >
             <Plus className="w-4 h-4" />
             New Project
@@ -147,10 +147,10 @@ export default function ProjectsPage() {
       <div className="p-8">
         {/* Error banner */}
         {error && (
-          <div className="mb-6 flex items-start gap-3 p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
-            <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-            <p className="text-sm text-red-300">{error}</p>
-            <button onClick={() => setError(null)} className="ml-auto text-slate-500 hover:text-white">
+          <div className="mb-6 flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
+            <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+            <p className="text-sm text-red-700">{error}</p>
+            <button onClick={() => setError(null)} className="ml-auto text-slate-500 hover:text-slate-900">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -159,8 +159,8 @@ export default function ProjectsPage() {
         {/* Section title */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-lg font-bold text-white">Your Projects</h2>
-            <p className="text-sm text-slate-400 mt-0.5">
+            <h2 className="text-lg font-bold text-slate-900">Your Projects</h2>
+            <p className="text-sm text-slate-600 mt-0.5">
               Each project has its own stories, Gherkin scenarios, and test results.
             </p>
           </div>
@@ -173,25 +173,25 @@ export default function ProjectsPage() {
         {isLoading && (
           <div className="flex items-center justify-center py-24">
             <div className="text-center">
-              <Loader2 className="w-10 h-10 text-purple-400 animate-spin mx-auto mb-4" />
-              <p className="text-slate-400">Loading projects…</p>
+              <Loader2 className="w-10 h-10 text-purple-600 animate-spin mx-auto mb-4" />
+              <p className="text-slate-600">Loading projects…</p>
             </div>
           </div>
         )}
 
         {/* Empty state */}
         {!isLoading && projects.length === 0 && !error && (
-          <div className="flex flex-col items-center justify-center py-24 border-2 border-dashed border-slate-700 rounded-2xl">
-            <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center mb-5">
-              <FolderOpen className="w-8 h-8 text-slate-500" />
+          <div className="flex flex-col items-center justify-center py-24 border-2 border-dashed border-slate-300 rounded-2xl bg-white">
+            <div className="w-16 h-16 bg-purple-50 border border-purple-200 rounded-2xl flex items-center justify-center mb-5">
+              <FolderOpen className="w-8 h-8 text-purple-600" />
             </div>
-            <h3 className="text-lg font-semibold text-white mb-2">No Projects Yet</h3>
-            <p className="text-sm text-slate-400 mb-6 text-center max-w-xs">
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">No Projects Yet</h3>
+            <p className="text-sm text-slate-600 mb-6 text-center max-w-xs">
               Create your first project to start generating Gherkin test cases from user stories.
             </p>
             <button
               onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-semibold text-sm transition-all"
+              className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold text-sm transition-all"
             >
               <Plus className="w-4 h-4" />
               Create First Project
@@ -209,23 +209,23 @@ export default function ProjectsPage() {
               return (
                 <div
                   key={project.id}
-                  className="group relative rounded-2xl border border-slate-700/60 bg-slate-900/50 hover:border-slate-600 hover:bg-slate-900 transition-all duration-200"
+                  className="group relative rounded-2xl border border-slate-200 bg-white hover:border-purple-300 hover:shadow-md transition-all duration-200"
                 >
                   <div className="p-6 flex items-center gap-5">
                     {/* Icon */}
-                    <div className="w-12 h-12 bg-linear-to-br from-purple-600/20 to-indigo-600/20 border border-purple-500/20 rounded-xl flex items-center justify-center shrink-0">
-                      <FolderOpen className="w-6 h-6 text-purple-400" />
+                    <div className="w-12 h-12 bg-linear-to-br from-purple-100 to-indigo-100 border border-purple-200 rounded-xl flex items-center justify-center shrink-0">
+                      <FolderOpen className="w-6 h-6 text-purple-600" />
                     </div>
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-1">
-                        <h3 className="text-base font-semibold text-white truncate">
+                        <h3 className="text-base font-semibold text-slate-900 truncate">
                           {project.name}
                         </h3>
                       </div>
                       {project.description && (
-                        <p className="text-sm text-slate-400 truncate mb-2">{project.description}</p>
+                        <p className="text-sm text-slate-600 truncate mb-2">{project.description}</p>
                       )}
                       <div className="flex items-center gap-4 text-xs text-slate-500">
                         <span className="flex items-center gap-1">
@@ -242,19 +242,19 @@ export default function ProjectsPage() {
                     {/* Actions */}
                     <div className="flex items-center gap-2 shrink-0">
                       {isConfirmingDelete ? (
-                        <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">
-                          <span className="text-xs text-red-300 font-medium">Delete project?</span>
+                        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                          <span className="text-xs text-red-700 font-medium">Delete project?</span>
                           <button
                             id={`btn-confirm-delete-${project.id}`}
                             onClick={() => handleDelete(project.id)}
                             disabled={isDeleting}
-                            className="text-xs bg-red-500 hover:bg-red-400 text-white px-2.5 py-1 rounded-lg font-medium transition-all disabled:opacity-50"
+                            className="text-xs bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded-lg font-medium transition-all disabled:opacity-50"
                           >
                             {isDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : "Delete"}
                           </button>
                           <button
                             onClick={() => setConfirmDeleteId(null)}
-                            className="text-slate-400 hover:text-white transition-colors"
+                            className="text-slate-500 hover:text-slate-900 transition-colors"
                           >
                             <X className="w-4 h-4" />
                           </button>
@@ -266,7 +266,7 @@ export default function ProjectsPage() {
                             e.stopPropagation();
                             setConfirmDeleteId(project.id);
                           }}
-                          className="p-2 text-slate-600 hover:text-red-400 rounded-lg hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
+                          className="p-2 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
                           title="Delete project"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -276,7 +276,7 @@ export default function ProjectsPage() {
                       <button
                         id={`btn-open-${project.id}`}
                         onClick={() => handleOpen(project)}
-                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium transition-all shadow-md shadow-purple-600/20"
+                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-sm font-medium transition-all shadow-md shadow-purple-600/20"
                       >
                         <Zap className="w-3.5 h-3.5" />
                         Open
@@ -293,26 +293,26 @@ export default function ProjectsPage() {
 
       {/* Create Project Modal */}
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-8 w-full max-w-md shadow-2xl shadow-black/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-white border border-slate-200 rounded-2xl p-8 w-full max-w-md shadow-2xl shadow-slate-900/20">
             <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 bg-purple-500/10 border border-purple-500/20 rounded-xl flex items-center justify-center">
-                <Plus className="w-5 h-5 text-purple-400" />
+              <div className="w-10 h-10 bg-purple-50 border border-purple-200 rounded-xl flex items-center justify-center">
+                <Plus className="w-5 h-5 text-purple-600" />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-white">New Project</h2>
-                <p className="text-xs text-slate-400">Each project is a fresh workspace</p>
+                <h2 className="text-lg font-bold text-slate-900">New Project</h2>
+                <p className="text-xs text-slate-500">Each project is a fresh workspace</p>
               </div>
               <button
                 onClick={() => { setShowCreate(false); setCreateError(null); setNewProjectName(""); setNewProjectDesc(""); }}
-                className="ml-auto text-slate-500 hover:text-white transition-colors"
+                className="ml-auto text-slate-400 hover:text-slate-900 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {createError && (
-              <div className="mb-4 flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-sm text-red-300">
+              <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 {createError}
               </div>
@@ -320,7 +320,7 @@ export default function ProjectsPage() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
                   Project Name *
                 </label>
                 <input
@@ -331,13 +331,13 @@ export default function ProjectsPage() {
                   onKeyDown={(e) => e.key === "Enter" && handleCreate()}
                   placeholder="e.g. E-Commerce Checkout Flow"
                   autoFocus
-                  className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 transition-colors"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                  Description <span className="text-slate-600 normal-case font-normal">(optional)</span>
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
+                  Description <span className="text-slate-400 normal-case font-normal">(optional)</span>
                 </label>
                 <textarea
                   id="input-project-desc"
@@ -345,14 +345,14 @@ export default function ProjectsPage() {
                   onChange={(e) => setNewProjectDesc(e.target.value)}
                   placeholder="What are we testing in this project?"
                   rows={3}
-                  className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 transition-colors resize-none"
                 />
               </div>
 
               <div className="flex gap-3 pt-2">
                 <button
                   onClick={() => { setShowCreate(false); setCreateError(null); setNewProjectName(""); setNewProjectDesc(""); }}
-                  className="flex-1 px-4 py-2.5 border border-slate-600 text-slate-400 hover:text-white rounded-xl text-sm font-medium transition-all"
+                  className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl text-sm font-medium transition-all"
                 >
                   Cancel
                 </button>
@@ -360,7 +360,7 @@ export default function ProjectsPage() {
                   id="btn-create-project"
                   onClick={handleCreate}
                   disabled={isCreating || !newProjectName.trim()}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-sm font-semibold transition-all"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-sm font-semibold transition-all"
                 >
                   {isCreating ? (
                     <Loader2 className="w-4 h-4 animate-spin" />

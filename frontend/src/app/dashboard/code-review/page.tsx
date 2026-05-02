@@ -250,9 +250,9 @@ describe("Shopping Cart", () => {
 };
 
 const frameworkTabs: { id: Framework; label: string; badge: string; color: string }[] = [
-  { id: "selenium", label: "Selenium", badge: "Python", color: "text-blue-400" },
-  { id: "playwright", label: "Playwright", badge: "Python", color: "text-emerald-400" },
-  { id: "cypress", label: "Cypress", badge: "JavaScript", color: "text-amber-400" },
+  { id: "selenium", label: "Selenium", badge: "Python", color: "text-blue-600" },
+  { id: "playwright", label: "Playwright", badge: "Python", color: "text-emerald-600" },
+  { id: "cypress", label: "Cypress", badge: "JavaScript", color: "text-amber-600" },
 ];
 
 const domElements = [
@@ -295,31 +295,31 @@ export default function CodeReviewPage() {
   return (
     <DashboardLayoutWrapper>
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-slate-950/80 backdrop-blur-sm border-b border-slate-800 px-8 py-5">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-sm border-b border-slate-200 px-8 py-5">
         <div className="flex justify-between items-center">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full tracking-wider">
+              <span className="text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full tracking-wider">
                 S4
               </span>
               <span className="text-xs text-slate-500">Pipeline Stage 4 of 5</span>
             </div>
-            <h1 className="text-2xl font-bold text-white">Code Review</h1>
-            <p className="text-slate-400 text-sm mt-0.5">
+            <h1 className="text-2xl font-bold text-slate-900">Code Review</h1>
+            <p className="text-slate-600 text-sm mt-0.5">
               Review and edit generated test code · Mode B DOM-Aware · SauceDemo
             </p>
           </div>
           <div className="flex items-center gap-3">
             <Link
               href="/dashboard/mode-setup"
-              className="flex items-center gap-2 px-4 py-2 border border-slate-700 text-slate-400 hover:text-white hover:border-slate-600 rounded-lg text-sm transition-all"
+              className="flex items-center gap-2 px-4 py-2 border border-slate-300 text-slate-600 hover:text-slate-900 hover:border-slate-400 hover:bg-slate-50 rounded-lg text-sm transition-all"
             >
               <ChevronLeft className="w-4 h-4" />
               Back
             </Link>
             <Link
               href="/dashboard/execution"
-              className="flex items-center gap-2 px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium text-sm transition-all shadow-lg shadow-purple-600/30"
+              className="flex items-center gap-2 px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium text-sm transition-all shadow-lg shadow-purple-600/30"
             >
               <PlayCircle className="w-4 h-4" />
               Run Tests
@@ -331,17 +331,17 @@ export default function CodeReviewPage() {
 
       <div className="flex gap-5 h-[calc(100vh-145px)] p-6">
         {/* Main Editor Area */}
-        <div className="flex-1 flex flex-col min-w-0 rounded-xl border border-slate-700 overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 rounded-xl border border-slate-200 overflow-hidden bg-white shadow-sm">
           {/* Framework Tabs */}
-          <div className="flex items-center bg-slate-900 border-b border-slate-700 px-2">
+          <div className="flex items-center bg-slate-50 border-b border-slate-200 px-2">
             {frameworkTabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveFramework(tab.id)}
                 className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-all ${
                   activeFramework === tab.id
-                    ? "border-purple-500 text-white bg-slate-800/50"
-                    : "border-transparent text-slate-500 hover:text-slate-300"
+                    ? "border-purple-500 text-slate-900 bg-white"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
                 }`}
               >
                 <Code2 className="w-4 h-4" />
@@ -352,17 +352,17 @@ export default function CodeReviewPage() {
             <div className="ml-auto flex items-center gap-1 pr-2">
               <button
                 onClick={handleCopy}
-                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white px-2.5 py-1.5 rounded-md hover:bg-slate-700 transition-all"
+                className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 px-2.5 py-1.5 rounded-md hover:bg-white transition-all"
               >
                 {copied ? (
-                  <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copied</>
+                  <><Check className="w-3.5 h-3.5 text-emerald-600" /> Copied</>
                 ) : (
                   <><Copy className="w-3.5 h-3.5" /> Copy</>
                 )}
               </button>
               <button
                 onClick={handleDownload}
-                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white px-2.5 py-1.5 rounded-md hover:bg-slate-700 transition-all"
+                className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 px-2.5 py-1.5 rounded-md hover:bg-white transition-all"
               >
                 <Download className="w-3.5 h-3.5" /> Download
               </button>
@@ -370,9 +370,9 @@ export default function CodeReviewPage() {
           </div>
 
           {/* Filename bar */}
-          <div className="px-4 py-1.5 bg-slate-900/60 border-b border-slate-700/50 flex items-center gap-2">
+          <div className="px-4 py-1.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
             <span className="text-[11px] text-slate-500 font-mono">{active.filename}</span>
-            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">
+            <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">
               Mode B · DOM-Aware
             </span>
           </div>
@@ -382,7 +382,7 @@ export default function CodeReviewPage() {
             <MonacoEditor
               height="100%"
               language={active.language}
-              theme="vs-dark"
+              theme="vs"
               value={active.code}
               onChange={handleCodeChange}
               options={{
@@ -401,10 +401,10 @@ export default function CodeReviewPage() {
 
         {/* Right panel — DOM Element Map */}
         <div className="w-64 shrink-0 flex flex-col gap-4">
-          <div className="rounded-xl border border-slate-700 overflow-hidden bg-slate-900 flex flex-col">
-            <div className="px-4 py-3 border-b border-slate-700 flex items-center gap-2">
-              <Database className="w-3.5 h-3.5 text-purple-400" />
-              <p className="text-xs font-semibold text-slate-300">DOM Element Map</p>
+          <div className="rounded-xl border border-slate-200 overflow-hidden bg-white flex flex-col shadow-sm">
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2 bg-slate-50">
+              <Database className="w-3.5 h-3.5 text-purple-600" />
+              <p className="text-xs font-semibold text-slate-700">DOM Element Map</p>
             </div>
             <div
               className="flex-1 overflow-y-auto py-2"
@@ -413,11 +413,11 @@ export default function CodeReviewPage() {
               {domElements.map((el) => (
                 <div
                   key={el.selector}
-                  className="px-4 py-2.5 hover:bg-slate-800 transition-colors border-b border-slate-800/50 last:border-0"
+                  className="px-4 py-2.5 hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0"
                 >
-                  <p className="text-[11px] font-mono text-emerald-400 mb-0.5">{el.selector}</p>
+                  <p className="text-[11px] font-mono text-emerald-700 mb-0.5">{el.selector}</p>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-600 bg-slate-800 px-1.5 py-0.5 rounded font-mono">
+                    <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded font-mono">
                       {el.tag}
                     </span>
                     <span className="text-[10px] text-slate-500">{el.step}</span>
@@ -428,21 +428,21 @@ export default function CodeReviewPage() {
           </div>
 
           {/* Risk badges */}
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-            <p className="text-xs font-semibold text-slate-400 mb-3 flex items-center gap-2">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-xs font-semibold text-slate-600 mb-3 flex items-center gap-2">
               ML Risk Prediction
             </p>
             {[
-              { label: "Login Flow", risk: "HIGH", color: "text-red-400 bg-red-500/10 border-red-500/20" },
-              { label: "Cart Operations", risk: "MEDIUM", color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
-              { label: "Checkout", risk: "HIGH", color: "text-red-400 bg-red-500/10 border-red-500/20" },
-              { label: "Search", risk: "LOW", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" },
+              { label: "Login Flow", risk: "HIGH", color: "text-red-700 bg-red-50 border-red-200" },
+              { label: "Cart Operations", risk: "MEDIUM", color: "text-amber-700 bg-amber-50 border-amber-200" },
+              { label: "Checkout", risk: "HIGH", color: "text-red-700 bg-red-50 border-red-200" },
+              { label: "Search", risk: "LOW", color: "text-emerald-700 bg-emerald-50 border-emerald-200" },
             ].map((item) => (
               <div
                 key={item.label}
-                className="flex items-center justify-between py-2 border-b border-slate-800 last:border-0"
+                className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0"
               >
-                <span className="text-xs text-slate-300">{item.label}</span>
+                <span className="text-xs text-slate-700">{item.label}</span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${item.color}`}>
                   {item.risk}
                 </span>

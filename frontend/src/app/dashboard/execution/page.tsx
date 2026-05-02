@@ -60,9 +60,9 @@ const screenshots = [
 
 const statusIcon: Record<LogEntry["status"], React.ReactNode> = {
   info: <Terminal className="w-3.5 h-3.5 text-slate-500" />,
-  running: <Clock className="w-3.5 h-3.5 text-blue-400 animate-pulse" />,
-  passed: <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />,
-  failed: <XCircle className="w-3.5 h-3.5 text-red-400" />,
+  running: <Clock className="w-3.5 h-3.5 text-blue-600 animate-pulse" />,
+  passed: <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />,
+  failed: <XCircle className="w-3.5 h-3.5 text-red-600" />,
 };
 
 export default function ExecutionPage() {
@@ -115,24 +115,24 @@ export default function ExecutionPage() {
   return (
     <DashboardLayoutWrapper>
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-slate-950/80 backdrop-blur-sm border-b border-slate-800 px-8 py-5">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-sm border-b border-slate-200 px-8 py-5">
         <div className="flex justify-between items-center">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full tracking-wider">
+              <span className="text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full tracking-wider">
                 S5
               </span>
               <span className="text-xs text-slate-500">Pipeline Stage 5 of 5</span>
             </div>
-            <h1 className="text-2xl font-bold text-white">Execution &amp; Report</h1>
-            <p className="text-slate-400 text-sm mt-0.5">
+            <h1 className="text-2xl font-bold text-slate-900">Execution &amp; Report</h1>
+            <p className="text-slate-600 text-sm mt-0.5">
               Run tests via GitHub Actions · Live log streaming · Download PDF report
             </p>
           </div>
           <div className="flex items-center gap-3">
             <Link
               href="/dashboard/code-review"
-              className="flex items-center gap-2 px-4 py-2 border border-slate-700 text-slate-400 hover:text-white hover:border-slate-600 rounded-lg text-sm transition-all"
+              className="flex items-center gap-2 px-4 py-2 border border-slate-300 text-slate-600 hover:text-slate-900 hover:border-slate-400 hover:bg-slate-50 rounded-lg text-sm transition-all"
             >
               <ChevronLeft className="w-4 h-4" />
               Back
@@ -140,7 +140,7 @@ export default function ExecutionPage() {
             {isDone && (
               <button
                 onClick={resetRun}
-                className="flex items-center gap-2 px-4 py-2 border border-slate-700 text-slate-400 hover:text-white rounded-lg text-sm transition-all"
+                className="flex items-center gap-2 px-4 py-2 border border-slate-300 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg text-sm transition-all"
               >
                 <RotateCcw className="w-4 h-4" />
                 Reset
@@ -151,8 +151,8 @@ export default function ExecutionPage() {
               disabled={runStatus === "running"}
               className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold text-sm transition-all ${
                 runStatus === "running"
-                  ? "bg-slate-700 text-slate-400 cursor-not-allowed"
-                  : "bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-600/30"
+                  ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                  : "bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-lg shadow-purple-600/30"
               }`}
             >
               {runStatus === "running" ? (
@@ -169,14 +169,14 @@ export default function ExecutionPage() {
         {/* Left: Log + Screenshots */}
         <div className="col-span-2 flex flex-col gap-5">
           {/* Live Log */}
-          <div className="rounded-xl border border-slate-700 overflow-hidden bg-slate-900">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-800/50">
+          <div className="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-sm">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
               <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-purple-400" />
-                <p className="text-sm font-semibold text-slate-200">Live Execution Log</p>
+                <Terminal className="w-4 h-4 text-purple-600" />
+                <p className="text-sm font-semibold text-slate-800">Live Execution Log</p>
                 {runStatus === "running" && (
-                  <span className="flex items-center gap-1.5 text-xs text-blue-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                  <span className="flex items-center gap-1.5 text-xs text-blue-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
                     Streaming via WebSocket...
                   </span>
                 )}
@@ -187,11 +187,11 @@ export default function ExecutionPage() {
             </div>
             <div
               ref={logRef}
-              className="h-64 overflow-y-auto p-4 font-mono text-xs space-y-1.5"
+              className="h-64 overflow-y-auto p-4 font-mono text-xs space-y-1.5 bg-slate-50/40"
               style={{ scrollbarWidth: "none" }}
             >
               {runStatus === "idle" && (
-                <p className="text-slate-600 italic">Press Run Tests to start execution...</p>
+                <p className="text-slate-400 italic">Press Run Tests to start execution...</p>
               )}
               {visibleLogs.map((log, i) => (
                 <div key={i} className="flex items-start gap-2.5 group">
@@ -199,18 +199,18 @@ export default function ExecutionPage() {
                   <span
                     className={`flex-1 ${
                       log.status === "failed"
-                        ? "text-red-400"
+                        ? "text-red-600"
                         : log.status === "passed"
-                        ? "text-slate-300"
+                        ? "text-slate-700"
                         : "text-slate-500"
                     }`}
                   >
                     {log.step}
                   </span>
                   {log.duration && (
-                    <span className="text-slate-600 shrink-0">{log.duration}</span>
+                    <span className="text-slate-400 shrink-0">{log.duration}</span>
                   )}
-                  <span className="text-slate-700 shrink-0">{log.timestamp}</span>
+                  <span className="text-slate-400 shrink-0">{log.timestamp}</span>
                 </div>
               ))}
             </div>
@@ -218,11 +218,11 @@ export default function ExecutionPage() {
 
           {/* Screenshots */}
           {isDone && (
-            <div className="rounded-xl border border-slate-700 bg-slate-900 overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-800/50">
+            <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
                 <div className="flex items-center gap-2">
-                  <ImageIcon className="w-4 h-4 text-purple-400" />
-                  <p className="text-sm font-semibold text-slate-200">Test Screenshots</p>
+                  <ImageIcon className="w-4 h-4 text-purple-600" />
+                  <p className="text-sm font-semibold text-slate-800">Test Screenshots</p>
                 </div>
               </div>
               <div className="p-4 grid grid-cols-3 gap-3">
@@ -230,26 +230,26 @@ export default function ExecutionPage() {
                   <div
                     key={s.label}
                     className={`rounded-lg border overflow-hidden ${
-                      s.status === "failed" ? "border-red-500/40" : "border-slate-700"
+                      s.status === "failed" ? "border-red-300" : "border-slate-200"
                     }`}
                   >
                     <div
-                      className={`h-24 flex items-center justify-center text-xs font-mono text-slate-600 ${
-                        s.status === "failed" ? "bg-red-500/5" : "bg-slate-800"
+                      className={`h-24 flex items-center justify-center text-xs font-mono ${
+                        s.status === "failed" ? "bg-red-50" : "bg-slate-50"
                       }`}
                     >
                       {s.status === "passed" ? (
-                        <span className="text-emerald-500/40">[ screenshot ]</span>
+                        <span className="text-emerald-600/70">[ screenshot ]</span>
                       ) : (
-                        <span className="text-red-500/40">[ assertion error ]</span>
+                        <span className="text-red-600/70">[ assertion error ]</span>
                       )}
                     </div>
-                    <div className="px-2.5 py-2 bg-slate-900/60 flex items-center justify-between">
-                      <p className="text-[11px] text-slate-400 truncate">{s.label}</p>
+                    <div className="px-2.5 py-2 bg-white flex items-center justify-between">
+                      <p className="text-[11px] text-slate-600 truncate">{s.label}</p>
                       {s.status === "passed" ? (
-                        <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                       ) : (
-                        <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                        <XCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
                       )}
                     </div>
                   </div>
@@ -262,18 +262,18 @@ export default function ExecutionPage() {
         {/* Right: Stats + Chart + Report */}
         <div className="flex flex-col gap-4">
           {/* Summary Stats */}
-          <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">
               Run Summary
             </p>
             <div className="space-y-3">
               {[
-                { label: "Total Tests", value: isDone ? String(total) : "—", color: "text-white" },
-                { label: "Passed", value: isDone ? String(passed) : "—", color: "text-emerald-400" },
-                { label: "Failed", value: isDone ? String(failed) : "—", color: "text-red-400" },
-                { label: "Success Rate", value: isDone ? `${successRate}%` : "—", color: "text-purple-400" },
-                { label: "Duration", value: isDone ? "36.4s" : "—", color: "text-slate-300" },
-                { label: "Framework", value: "Playwright", color: "text-emerald-400" },
+                { label: "Total Tests", value: isDone ? String(total) : "—", color: "text-slate-900" },
+                { label: "Passed", value: isDone ? String(passed) : "—", color: "text-emerald-700" },
+                { label: "Failed", value: isDone ? String(failed) : "—", color: "text-red-700" },
+                { label: "Success Rate", value: isDone ? `${successRate}%` : "—", color: "text-purple-700" },
+                { label: "Duration", value: isDone ? "36.4s" : "—", color: "text-slate-700" },
+                { label: "Framework", value: "Playwright", color: "text-emerald-700" },
               ].map((s) => (
                 <div key={s.label} className="flex items-center justify-between">
                   <span className="text-xs text-slate-500">{s.label}</span>
@@ -285,7 +285,7 @@ export default function ExecutionPage() {
 
           {/* Donut Chart */}
           {isDone && (
-            <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">
                 Pass / Fail Chart
               </p>
@@ -305,17 +305,17 @@ export default function ExecutionPage() {
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-                    labelStyle={{ color: "#94a3b8" }}
-                    itemStyle={{ color: "#e2e8f0" }}
+                    contentStyle={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 8 }}
+                    labelStyle={{ color: "#475569" }}
+                    itemStyle={{ color: "#0f172a" }}
                   />
                 </PieChart>
               </ResponsiveContainer>
               <div className="flex justify-center gap-5 mt-1">
                 {chartData.map((d) => (
-                  <div key={d.name} className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <div key={d.name} className="flex items-center gap-1.5 text-xs text-slate-600">
                     <span className="w-2.5 h-2.5 rounded-full" style={{ background: d.color }} />
-                    {d.name}: <span className="text-white font-semibold">{d.value}</span>
+                    {d.name}: <span className="text-slate-900 font-semibold">{d.value}</span>
                   </div>
                 ))}
               </div>
@@ -324,15 +324,15 @@ export default function ExecutionPage() {
 
           {/* Failed test AI explanation */}
           {isDone && (
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
               <div className="flex items-center gap-2 mb-2">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                <p className="text-xs font-semibold text-amber-300">AI Failure Explanation</p>
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                <p className="text-xs font-semibold text-amber-800">AI Failure Explanation</p>
               </div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                <span className="text-amber-400 font-mono">test_checkout_missing_info</span> failed
+              <p className="text-xs text-slate-700 leading-relaxed">
+                <span className="text-amber-700 font-mono">test_checkout_missing_info</span> failed
                 because the error message selector{" "}
-                <span className="font-mono text-red-400">[data-test=&apos;error&apos;]</span> was
+                <span className="font-mono text-red-700">[data-test=&apos;error&apos;]</span> was
                 not found in the DOM. The element may have a dynamic class. C3 Self-Healing will
                 attempt to locate an alternative selector.
               </p>
@@ -341,7 +341,7 @@ export default function ExecutionPage() {
 
           {/* Download */}
           {isDone && (
-            <button className="w-full flex items-center justify-center gap-2 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-600 text-slate-300 hover:text-white rounded-xl text-sm font-medium transition-all">
+            <button className="w-full flex items-center justify-center gap-2 py-3 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 text-slate-700 hover:text-slate-900 rounded-xl text-sm font-medium transition-all shadow-sm">
               <Download className="w-4 h-4" />
               Download PDF Report
             </button>
@@ -349,15 +349,15 @@ export default function ExecutionPage() {
 
           {/* Pipeline complete */}
           {isDone && (
-            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
-              <CheckCircle className="w-6 h-6 text-emerald-400 mx-auto mb-2" />
-              <p className="text-xs font-semibold text-emerald-300">Pipeline Complete</p>
-              <p className="text-[11px] text-slate-500 mt-1">
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+              <CheckCircle className="w-6 h-6 text-emerald-600 mx-auto mb-2" />
+              <p className="text-xs font-semibold text-emerald-800">Pipeline Complete</p>
+              <p className="text-[11px] text-slate-600 mt-1">
                 Results written to PostgreSQL · C3 &amp; C4 notified
               </p>
               <Link
                 href="/dashboard"
-                className="inline-flex items-center gap-1.5 mt-3 text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                className="inline-flex items-center gap-1.5 mt-3 text-xs text-purple-700 hover:text-purple-800 transition-colors"
               >
                 <PlayCircle className="w-3.5 h-3.5" />
                 Start new pipeline

@@ -11,7 +11,7 @@
   },
   "lint-staged": {
     "frontend/**/*.{js,ts,jsx,tsx}": [
-      "pnpm --filter frontend exec next lint --fix --file"
+      "node scripts/lint-frontend.js"
     ],
     "backend/**/*.py": [
       "backend/.venv/Scripts/ruff check --fix",

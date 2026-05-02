@@ -3,7 +3,7 @@
  * Base URL reads from NEXT_PUBLIC_API_URL env var (defaults to localhost:8002).
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8002";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

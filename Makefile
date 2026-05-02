@@ -1,5 +1,7 @@
 .PHONY: up down logs restart build dev-frontend dev-backend install format
 
+BACKEND_PORT ?= 8080
+
 # --- Docker Commands ---
 up:
 	docker-compose up --build -d
@@ -22,7 +24,7 @@ dev-frontend:
 	cd frontend && pnpm run dev
 
 dev-backend:
-	cd backend && ".venv/Scripts/python" -m uvicorn app.main:app --reload --port 8002
+	cd backend && ".venv/Scripts/python" -m uvicorn app.main:app --reload --port $(BACKEND_PORT)
 
 install:
 	npm install

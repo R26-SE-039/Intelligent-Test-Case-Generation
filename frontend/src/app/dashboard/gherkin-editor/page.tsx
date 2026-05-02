@@ -176,8 +176,8 @@ export default function GherkinEditorPage() {
       <DashboardLayoutWrapper>
         <div className="flex items-center justify-center h-screen">
           <div className="text-center">
-            <Loader2 className="w-10 h-10 text-purple-400 animate-spin mx-auto mb-4" />
-            <p className="text-slate-300 font-medium">Loading Gherkin scenarios…</p>
+            <Loader2 className="w-10 h-10 text-purple-600 animate-spin mx-auto mb-4" />
+            <p className="text-slate-700 font-medium">Loading Gherkin scenarios…</p>
             <p className="text-slate-500 text-sm mt-1">Fetching from database</p>
           </div>
         </div>
@@ -188,39 +188,39 @@ export default function GherkinEditorPage() {
   return (
     <DashboardLayoutWrapper>
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-slate-950/80 backdrop-blur-sm border-b border-slate-800 px-8 py-5">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-sm border-b border-slate-200 px-8 py-5">
         <div className="flex justify-between items-center">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full tracking-wider">
+              <span className="text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full tracking-wider">
                 S2
               </span>
               <span className="text-xs text-slate-500">Pipeline Stage 2 of 5</span>
-              <span className="text-slate-700 mx-1">·</span>
+              <span className="text-slate-300 mx-1">·</span>
               <Link
                 href="/projects"
-                className="flex items-center gap-1 text-xs text-slate-500 hover:text-purple-400 transition-colors"
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-purple-600 transition-colors"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
                 {activeProject.name}
               </Link>
             </div>
-            <h1 className="text-2xl font-bold text-white">Gherkin Editor</h1>
-            <p className="text-slate-400 text-sm mt-0.5">
+            <h1 className="text-2xl font-bold text-slate-900">Gherkin Editor</h1>
+            <p className="text-slate-600 text-sm mt-0.5">
               Review and edit AI-generated Given/When/Then scenarios
             </p>
           </div>
           <div className="flex items-center gap-3">
             <Link
               href="/dashboard"
-              className="flex items-center gap-2 px-4 py-2 border border-slate-700 text-slate-400 hover:text-white hover:border-slate-600 rounded-lg text-sm transition-all"
+              className="flex items-center gap-2 px-4 py-2 border border-slate-300 text-slate-600 hover:text-slate-900 hover:border-slate-400 hover:bg-slate-50 rounded-lg text-sm transition-all"
             >
               <ChevronLeft className="w-4 h-4" />
               Back
             </Link>
             <Link
               href="/dashboard/mode-setup"
-              className="flex items-center gap-2 px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium text-sm transition-all shadow-lg shadow-purple-600/30"
+              className="flex items-center gap-2 px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium text-sm transition-all shadow-lg shadow-purple-600/30"
             >
               Mode & URL Setup
               <ChevronRight className="w-4 h-4" />
@@ -231,17 +231,17 @@ export default function GherkinEditorPage() {
 
       {/* Error banner */}
       {error && (
-        <div className="mx-8 mt-4 flex items-start gap-3 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-          <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-          <p className="text-sm text-red-300">{error}</p>
-          <button onClick={() => setError(null)} className="ml-auto text-slate-400 hover:text-white">✕</button>
+        <div className="mx-8 mt-4 flex items-start gap-3 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
+          <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+          <p className="text-sm text-red-700">{error}</p>
+          <button onClick={() => setError(null)} className="ml-auto text-slate-400 hover:text-slate-900">✕</button>
         </div>
       )}
 
       {/* Human-in-the-loop info banner */}
-      <div className="mx-8 mt-6 flex items-start gap-3 px-4 py-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-        <Info className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
-        <p className="text-sm text-blue-300">
+      <div className="mx-8 mt-6 flex items-start gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+        <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+        <p className="text-sm text-blue-700">
           <span className="font-semibold">Human-in-the-loop:</span> Edit Gherkin scenarios before
           generating code. Save changes to PostgreSQL. Approve each scenario when satisfied — approvals
           persist across sessions.
@@ -251,14 +251,14 @@ export default function GherkinEditorPage() {
       {/* Empty state */}
       {stories.length === 0 && !isLoading && (
         <div className="flex flex-col items-center justify-center py-20">
-          <FileText className="w-12 h-12 text-slate-600 mb-4" />
-          <h3 className="text-base font-semibold text-white mb-2">No Gherkin Scenarios</h3>
-          <p className="text-sm text-slate-400 mb-5">
+          <FileText className="w-12 h-12 text-slate-400 mb-4" />
+          <h3 className="text-base font-semibold text-slate-900 mb-2">No Gherkin Scenarios</h3>
+          <p className="text-sm text-slate-600 mb-5">
             Go back to User Stories and generate Gherkin first.
           </p>
           <Link
             href="/dashboard"
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-medium transition-all"
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-all"
           >
             <ChevronLeft className="w-4 h-4" /> Back to Stories
           </Link>
@@ -267,14 +267,14 @@ export default function GherkinEditorPage() {
 
       {/* Main editor layout */}
       {stories.length > 0 && (
-        <div className="flex gap-0 h-[calc(100vh-280px)] mx-8 mt-6 mb-8 rounded-xl border border-slate-700 overflow-hidden">
+        <div className="flex gap-0 h-[calc(100vh-280px)] mx-8 mt-6 mb-8 rounded-xl border border-slate-200 overflow-hidden bg-white shadow-sm">
           {/* Left panel — story list */}
-          <div className="w-64 shrink-0 bg-slate-900 border-r border-slate-700 flex flex-col">
-            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+          <div className="w-64 shrink-0 bg-slate-50 border-r border-slate-200 flex flex-col">
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-white">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">
                 Stories ({stories.length})
               </p>
-              <span className="text-[10px] text-emerald-400 font-semibold">
+              <span className="text-[10px] text-emerald-700 font-semibold">
                 {approvedCount}/{stories.length} approved
               </span>
             </div>
@@ -287,16 +287,16 @@ export default function GherkinEditorPage() {
                     onClick={() => setActiveId(story.id)}
                     className={`w-full text-left px-4 py-3 transition-all border-l-2 ${
                       isActive
-                        ? "border-purple-500 bg-purple-500/10 text-white"
-                        : "border-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                        ? "border-purple-500 bg-purple-50 text-slate-900"
+                        : "border-transparent text-slate-600 hover:bg-white hover:text-slate-900"
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-mono text-purple-400">{story.id}</span>
+                      <span className="text-xs font-mono text-purple-700">{story.id}</span>
                       <div className="flex items-center gap-1">
-                        {story.generator === "llm" && <Cpu className="w-3 h-3 text-indigo-400" />}
-                        {story.edited && <Edit3 className="w-3 h-3 text-amber-400" />}
-                        {story.approved && <CheckCircle className="w-3 h-3 text-emerald-400" />}
+                        {story.generator === "llm" && <Cpu className="w-3 h-3 text-indigo-600" />}
+                        {story.edited && <Edit3 className="w-3 h-3 text-amber-600" />}
+                        {story.approved && <CheckCircle className="w-3 h-3 text-emerald-600" />}
                       </div>
                     </div>
                     <p className="text-xs font-medium leading-tight">{story.title}</p>
@@ -311,16 +311,16 @@ export default function GherkinEditorPage() {
 
           {/* Right panel — Monaco editor */}
           {activeStory && (
-            <div className="flex-1 flex flex-col bg-slate-950">
+            <div className="flex-1 flex flex-col bg-white">
               {/* Editor toolbar */}
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-700 bg-slate-900/50">
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50">
                 <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-purple-400" />
-                  <span className="text-sm font-medium text-slate-200">
+                  <FileText className="w-4 h-4 text-purple-600" />
+                  <span className="text-sm font-medium text-slate-800">
                     {activeStory.title}.feature
                   </span>
                   {activeStory.edited && (
-                    <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded">
+                    <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded">
                       UNSAVED
                     </span>
                   )}
@@ -331,7 +331,7 @@ export default function GherkinEditorPage() {
                     onClick={handleRegenerate}
                     disabled={isRegenerating}
                     title="Force regenerate (overwrites edits)"
-                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-300 px-2.5 py-1.5 rounded-md hover:bg-slate-700 transition-all disabled:opacity-50"
+                    className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-indigo-700 px-2.5 py-1.5 rounded-md hover:bg-white transition-all disabled:opacity-50"
                   >
                     {isRegenerating ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -346,7 +346,7 @@ export default function GherkinEditorPage() {
                     <button
                       onClick={handleSave}
                       disabled={isSaving}
-                      className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 px-2.5 py-1.5 rounded-md hover:bg-slate-700 transition-all"
+                      className="flex items-center gap-1.5 text-xs text-emerald-700 hover:text-emerald-800 px-2.5 py-1.5 rounded-md hover:bg-emerald-50 transition-all"
                     >
                       {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                       Save to DB
@@ -356,9 +356,9 @@ export default function GherkinEditorPage() {
                   {/* Copy */}
                   <button
                     onClick={handleCopy}
-                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors px-2.5 py-1.5 rounded-md hover:bg-slate-700"
+                    className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 transition-colors px-2.5 py-1.5 rounded-md hover:bg-white"
                   >
-                    {copied ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copied</> : <><Copy className="w-3.5 h-3.5" /> Copy</>}
+                    {copied ? <><Check className="w-3.5 h-3.5 text-emerald-600" /> Copied</> : <><Copy className="w-3.5 h-3.5" /> Copy</>}
                   </button>
 
                   {/* Approve — persists to DB */}
@@ -367,8 +367,8 @@ export default function GherkinEditorPage() {
                     disabled={isApproving}
                     className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md font-medium transition-all disabled:opacity-50 ${
                       activeStory.approved
-                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                        : "bg-purple-600 hover:bg-purple-500 text-white"
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : "bg-purple-600 hover:bg-purple-700 text-white"
                     }`}
                   >
                     {isApproving ? (
@@ -386,7 +386,7 @@ export default function GherkinEditorPage() {
                 <MonacoEditor
                   height="100%"
                   language="plaintext"
-                  theme="vs-dark"
+                  theme="vs"
                   value={activeStory.content}
                   onChange={handleChange}
                   options={{
@@ -403,12 +403,12 @@ export default function GherkinEditorPage() {
               </div>
 
               {/* Bottom status bar */}
-              <div className="flex items-center justify-between px-4 py-2 border-t border-slate-700 bg-slate-900/50">
+              <div className="flex items-center justify-between px-4 py-2 border-t border-slate-200 bg-slate-50">
                 <div className="flex items-center gap-4 text-[11px] text-slate-500">
                   <span>{activeStory.content.split("\n").length} lines</span>
                   <span>Gherkin · Given/When/Then</span>
                   <span className="capitalize">
-                    Generator: <span className="text-purple-400">{activeStory.generator}</span>
+                    Generator: <span className="text-purple-700">{activeStory.generator}</span>
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-500">

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, ReactNode } from "react";
 
 export interface ActiveProject {
   id: string;
@@ -20,20 +20,21 @@ const ProjectContext = createContext<ProjectContextValue>({
 
 const STORAGE_KEY = "nextgenqa_active_project";
 
-export function ProjectProvider({ children }: { children: ReactNode }) {
-  const [activeProject, setActiveProjectState] = useState<ActiveProject | null>(null);
+function getInitialProject(): ActiveProject | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
 
-  // Restore from localStorage on mount
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        setActiveProjectState(JSON.parse(stored));
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? (JSON.parse(stored) as ActiveProject) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function ProjectProvider({ children }: { children: ReactNode }) {
+  const [activeProject, setActiveProjectState] = useState<ActiveProject | null>(getInitialProject);
 
   const setActiveProject = (p: ActiveProject | null) => {
     setActiveProjectState(p);
