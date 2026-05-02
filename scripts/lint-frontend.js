@@ -13,7 +13,9 @@ const fs = require("fs");
 let rootDir = __dirname;
 while (rootDir !== path.dirname(rootDir)) {
   if (fs.existsSync(path.join(rootDir, "package.json"))) {
-    const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8"));
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(rootDir, "package.json"), "utf8"),
+    );
     if (pkg.name === "intelligent-test-case-generation") {
       break;
     }

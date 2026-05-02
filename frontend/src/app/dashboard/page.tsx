@@ -3,7 +3,13 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayoutWrapper from "@/components/dashboard-layout-wrapper";
-import { listStories, addStory, deleteStory, saveStories, generateGherkin } from "@/lib/api";
+import {
+  listStories,
+  addStory,
+  deleteStory,
+  saveStories,
+  generateGherkin,
+} from "@/lib/api";
 import { useProject } from "@/lib/project-context";
 import type { UserStoryResponse } from "@/lib/api";
 import {
@@ -37,16 +43,46 @@ interface UserStory {
   source: "C1" | "manual";
 }
 
-const priorityConfig: Record<Priority, { label: string; color: string; bg: string }> = {
-  high: { label: "HIGH", color: "text-red-700", bg: "bg-red-50 border border-red-200" },
-  medium: { label: "MED", color: "text-amber-700", bg: "bg-amber-50 border border-amber-200" },
-  low: { label: "LOW", color: "text-emerald-700", bg: "bg-emerald-50 border border-emerald-200" },
+const priorityConfig: Record<
+  Priority,
+  { label: string; color: string; bg: string }
+> = {
+  high: {
+    label: "HIGH",
+    color: "text-red-700",
+    bg: "bg-red-50 border border-red-200",
+  },
+  medium: {
+    label: "MED",
+    color: "text-amber-700",
+    bg: "bg-amber-50 border border-amber-200",
+  },
+  low: {
+    label: "LOW",
+    color: "text-emerald-700",
+    bg: "bg-emerald-50 border border-emerald-200",
+  },
 };
 
-const statusConfig: Record<Status, { label: string; icon: React.ReactNode; color: string }> = {
-  pending: { label: "Pending", icon: <Clock className="w-3.5 h-3.5" />, color: "text-slate-500" },
-  processing: { label: "Processing", icon: <RefreshCw className="w-3.5 h-3.5 animate-spin" />, color: "text-blue-600" },
-  done: { label: "Done", icon: <CheckCircle className="w-3.5 h-3.5" />, color: "text-emerald-600" },
+const statusConfig: Record<
+  Status,
+  { label: string; icon: React.ReactNode; color: string }
+> = {
+  pending: {
+    label: "Pending",
+    icon: <Clock className="w-3.5 h-3.5" />,
+    color: "text-slate-500",
+  },
+  processing: {
+    label: "Processing",
+    icon: <RefreshCw className="w-3.5 h-3.5 animate-spin" />,
+    color: "text-blue-600",
+  },
+  done: {
+    label: "Done",
+    icon: <CheckCircle className="w-3.5 h-3.5" />,
+    color: "text-emerald-600",
+  },
 };
 
 function toStory(r: UserStoryResponse): UserStory {
@@ -123,7 +159,9 @@ export default function UserStoryIntakePage() {
   };
 
   const nextStoryId = () => {
-    const nums = stories.map((s) => parseInt(s.id.replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
+    const nums = stories
+      .map((s) => parseInt(s.id.replace(/\D/g, ""), 10))
+      .filter((n) => !isNaN(n));
     const max = nums.length > 0 ? Math.max(...nums) : 0;
     return `US-${String(max + 1).padStart(3, "0")}`;
   };
@@ -168,7 +206,11 @@ export default function UserStoryIntakePage() {
     try {
       await deleteStory(activeProject.id, storyId);
       setStories((prev) => prev.filter((s) => s.id !== storyId));
-      setSelected((prev) => { const n = new Set(prev); n.delete(storyId); return n; });
+      setSelected((prev) => {
+        const n = new Set(prev);
+        n.delete(storyId);
+        return n;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete story");
     } finally {
@@ -196,7 +238,7 @@ export default function UserStoryIntakePage() {
           status: s.status,
           source: s.source,
           acceptance_criteria: s.acceptanceCriteria,
-        }))
+        })),
       );
 
       // Generate Gherkin
@@ -209,7 +251,7 @@ export default function UserStoryIntakePage() {
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to connect to backend. Is the FastAPI server running on port 8002?"
+          : "Failed to connect to backend. Is the FastAPI server running on port 8002?",
       );
       setIsGenerating(false);
     }
@@ -237,7 +279,9 @@ export default function UserStoryIntakePage() {
               <span className="text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full tracking-wider">
                 S1
               </span>
-              <span className="text-xs text-slate-500">Pipeline Stage 1 of 5</span>
+              <span className="text-xs text-slate-500">
+                Pipeline Stage 1 of 5
+              </span>
               <span className="text-slate-300 mx-1">·</span>
               <Link
                 href="/projects"
@@ -247,9 +291,12 @@ export default function UserStoryIntakePage() {
                 {activeProject.name}
               </Link>
             </div>
-            <h1 className="text-2xl font-bold text-slate-900">User Story Intake</h1>
+            <h1 className="text-2xl font-bold text-slate-900">
+              User Story Intake
+            </h1>
             <p className="text-slate-600 text-sm mt-0.5">
-              Review and manage stories · Select to generate Gherkin test scenarios
+              Review and manage stories · Select to generate Gherkin test
+              scenarios
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -278,7 +325,9 @@ export default function UserStoryIntakePage() {
                 ) : (
                   <Zap className="w-4 h-4" />
                 )}
-                {isGenerating ? "Generating…" : `Generate Gherkin (${selected.size})`}
+                {isGenerating
+                  ? "Generating…"
+                  : `Generate Gherkin (${selected.size})`}
                 {!isGenerating && <ChevronRight className="w-4 h-4" />}
               </button>
             )}
@@ -307,12 +356,39 @@ export default function UserStoryIntakePage() {
         {/* Stats Row */}
         <div className="grid grid-cols-4 gap-4 mb-8">
           {[
-            { label: "Total Stories", value: stats.total, color: "text-violet-700", bg: "bg-violet-50 border-violet-200", dot: "bg-violet-500" },
-            { label: "Pending", value: stats.pending, color: "text-slate-800", bg: "bg-white border-slate-200", dot: "bg-slate-400" },
-            { label: "Processing", value: stats.processing, color: "text-sky-700", bg: "bg-sky-50 border-sky-200", dot: "bg-sky-500" },
-            { label: "Completed", value: stats.done, color: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200", dot: "bg-emerald-500" },
+            {
+              label: "Total Stories",
+              value: stats.total,
+              color: "text-violet-700",
+              bg: "bg-violet-50 border-violet-200",
+              dot: "bg-violet-500",
+            },
+            {
+              label: "Pending",
+              value: stats.pending,
+              color: "text-slate-800",
+              bg: "bg-white border-slate-200",
+              dot: "bg-slate-400",
+            },
+            {
+              label: "Processing",
+              value: stats.processing,
+              color: "text-sky-700",
+              bg: "bg-sky-50 border-sky-200",
+              dot: "bg-sky-500",
+            },
+            {
+              label: "Completed",
+              value: stats.done,
+              color: "text-emerald-700",
+              bg: "bg-emerald-50 border-emerald-200",
+              dot: "bg-emerald-500",
+            },
           ].map((s) => (
-            <div key={s.label} className={`rounded-xl border ${s.bg} p-4 transition-all hover:scale-[1.02] hover:shadow-sm`}>
+            <div
+              key={s.label}
+              className={`rounded-xl border ${s.bg} p-4 transition-all hover:scale-[1.02] hover:shadow-sm`}
+            >
               <div className="flex items-center gap-2 mb-2">
                 <span className={`w-2 h-2 rounded-full ${s.dot}`} />
                 <p className="text-xs text-slate-600 font-medium">{s.label}</p>
@@ -327,11 +403,15 @@ export default function UserStoryIntakePage() {
           <div className="mb-6 p-5 bg-white border border-slate-200 rounded-xl shadow-sm">
             <div className="flex items-center gap-2 mb-4">
               <User className="w-4 h-4 text-purple-600" />
-              <p className="text-sm font-semibold text-slate-900">Add Story Manually</p>
+              <p className="text-sm font-semibold text-slate-900">
+                Add Story Manually
+              </p>
             </div>
             <div className="grid grid-cols-3 gap-3 mb-3">
               <div>
-                <label className="block text-xs text-slate-600 mb-1.5">Actor (who)</label>
+                <label className="block text-xs text-slate-600 mb-1.5">
+                  Actor (who)
+                </label>
                 <input
                   value={manualActor}
                   onChange={(e) => setManualActor(e.target.value)}
@@ -340,7 +420,9 @@ export default function UserStoryIntakePage() {
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-600 mb-1.5">Action (what) *</label>
+                <label className="block text-xs text-slate-600 mb-1.5">
+                  Action (what) *
+                </label>
                 <input
                   value={manualAction}
                   onChange={(e) => setManualAction(e.target.value)}
@@ -349,7 +431,9 @@ export default function UserStoryIntakePage() {
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-600 mb-1.5">Goal (why)</label>
+                <label className="block text-xs text-slate-600 mb-1.5">
+                  Goal (why)
+                </label>
                 <input
                   value={manualGoal}
                   onChange={(e) => setManualGoal(e.target.value)}
@@ -381,7 +465,9 @@ export default function UserStoryIntakePage() {
           <div className="flex items-center justify-center py-16">
             <div className="text-center">
               <Loader2 className="w-8 h-8 text-purple-600 animate-spin mx-auto mb-3" />
-              <p className="text-slate-600 text-sm">Loading stories from database…</p>
+              <p className="text-slate-600 text-sm">
+                Loading stories from database…
+              </p>
             </div>
           </div>
         )}
@@ -390,9 +476,12 @@ export default function UserStoryIntakePage() {
         {!isLoadingStories && stories.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 border-2 border-dashed border-slate-300 rounded-xl bg-white">
             <FolderOpen className="w-10 h-10 text-slate-400 mb-4" />
-            <h3 className="text-base font-semibold text-slate-900 mb-1">No Stories Yet</h3>
+            <h3 className="text-base font-semibold text-slate-900 mb-1">
+              No Stories Yet
+            </h3>
             <p className="text-sm text-slate-600 mb-5 text-center max-w-xs">
-              This project has no user stories. Add them manually or import from Component 1.
+              This project has no user stories. Add them manually or import from
+              Component 1.
             </p>
             <button
               onClick={() => setShowManual(true)}
@@ -414,10 +503,14 @@ export default function UserStoryIntakePage() {
                 >
                   <div
                     className={`w-4 h-4 rounded border transition-all ${
-                      selected.size === stories.length ? "bg-purple-600 border-purple-600" : "border-slate-400"
+                      selected.size === stories.length
+                        ? "bg-purple-600 border-purple-600"
+                        : "border-slate-400"
                     }`}
                   >
-                    {selected.size === stories.length && <CheckCircle className="w-4 h-4 text-white" />}
+                    {selected.size === stories.length && (
+                      <CheckCircle className="w-4 h-4 text-white" />
+                    )}
                   </div>
                   Select All
                 </button>
@@ -429,7 +522,9 @@ export default function UserStoryIntakePage() {
                       key={p}
                       onClick={() => setFilterPriority(p)}
                       className={`px-2.5 py-1 rounded-md transition-all capitalize ${
-                        filterPriority === p ? "bg-purple-100 text-purple-700 border border-purple-200" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                        filterPriority === p
+                          ? "bg-purple-100 text-purple-700 border border-purple-200"
+                          : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
                       }`}
                     >
                       {p}
@@ -438,7 +533,9 @@ export default function UserStoryIntakePage() {
                 </div>
               </div>
               <p className="text-xs text-slate-500">
-                {selected.size > 0 ? `${selected.size} selected` : `${filtered.length} stories`}
+                {selected.size > 0
+                  ? `${selected.size} selected`
+                  : `${filtered.length} stories`}
               </p>
             </div>
 
@@ -453,7 +550,15 @@ export default function UserStoryIntakePage() {
                 return (
                   <div
                     key={story.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => toggle(story.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggle(story.id);
+                      }
+                    }}
                     className={`group relative rounded-xl border cursor-pointer transition-all duration-200 ${
                       isSelected
                         ? "border-purple-400 bg-purple-50/60 shadow-md shadow-purple-500/10"
@@ -465,20 +570,30 @@ export default function UserStoryIntakePage() {
                         {/* Checkbox */}
                         <div
                           className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
-                            isSelected ? "bg-purple-600 border-purple-600" : "border-slate-300 group-hover:border-purple-400"
+                            isSelected
+                              ? "bg-purple-600 border-purple-600"
+                              : "border-slate-300 group-hover:border-purple-400"
                           }`}
                         >
-                          {isSelected && <CheckCircle className="w-4 h-4 text-white" />}
+                          {isSelected && (
+                            <CheckCircle className="w-4 h-4 text-white" />
+                          )}
                         </div>
 
                         {/* Content */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap mb-2">
-                            <span className="text-xs font-mono font-bold text-purple-700">{story.id}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${pCfg.bg} ${pCfg.color}`}>
+                            <span className="text-xs font-mono font-bold text-purple-700">
+                              {story.id}
+                            </span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${pCfg.bg} ${pCfg.color}`}
+                            >
                               {pCfg.label}
                             </span>
-                            <span className={`flex items-center gap-1 text-[11px] ${sCfg.color}`}>
+                            <span
+                              className={`flex items-center gap-1 text-[11px] ${sCfg.color}`}
+                            >
                               {sCfg.icon} {sCfg.label}
                             </span>
                             {story.source === "manual" && (
@@ -489,14 +604,25 @@ export default function UserStoryIntakePage() {
                           </div>
 
                           <p className="text-sm text-slate-900 font-medium mb-1">
-                            As a <span className="text-purple-700">{story.actor}</span>, I want to{" "}
-                            <span className="text-slate-900">{story.action}</span>, so that I can{" "}
-                            <span className="text-slate-700">{story.goal}</span>.
+                            As a{" "}
+                            <span className="text-purple-700">
+                              {story.actor}
+                            </span>
+                            , I want to{" "}
+                            <span className="text-slate-900">
+                              {story.action}
+                            </span>
+                            , so that I can{" "}
+                            <span className="text-slate-700">{story.goal}</span>
+                            .
                           </p>
 
                           <div className="mt-3 flex flex-wrap gap-2">
                             {story.acceptanceCriteria.map((ac, i) => (
-                              <span key={i} className="text-[11px] bg-slate-50 text-slate-600 px-2.5 py-1 rounded-lg border border-slate-200">
+                              <span
+                                key={i}
+                                className="text-[11px] bg-slate-50 text-slate-600 px-2.5 py-1 rounded-lg border border-slate-200"
+                              >
                                 ✓ {ac}
                               </span>
                             ))}
@@ -524,7 +650,9 @@ export default function UserStoryIntakePage() {
                           </button>
                           <ChevronRight
                             className={`w-4 h-4 transition-all ${
-                              isSelected ? "text-purple-600" : "text-slate-300 group-hover:text-slate-500"
+                              isSelected
+                                ? "text-purple-600"
+                                : "text-slate-300 group-hover:text-slate-500"
                             }`}
                           />
                         </div>
