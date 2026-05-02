@@ -40,6 +40,13 @@ export interface GherkinResult {
   approved: boolean;
 }
 
+export interface CodeGenResult {
+  framework: string;
+  language: string;
+  filename: string;
+  code: string;
+}
+
 // ─── Core fetch helper ────────────────────────────────────────────────────────
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -161,5 +168,25 @@ export async function regenerateGherkin(
 ): Promise<GherkinResult> {
   return request<GherkinResult>(`/api/v1/gherkin/${projectId}/${storyId}/regenerate`, {
     method: "POST",
+  });
+}
+
+// ─── Code Generation API ──────────────────────────────────────────────────────
+
+/** Generate test code for all Gherkin stories in a project. */
+export async function generateTestCode(
+  projectId: string,
+  url: string,
+  mode: string,
+  frameworks: string[]
+): Promise<CodeGenResult[]> {
+  return request<CodeGenResult[]>("/api/v1/code/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      project_id: projectId,
+      url,
+      mode,
+      frameworks,
+    }),
   });
 }

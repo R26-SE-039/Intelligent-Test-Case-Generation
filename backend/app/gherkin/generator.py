@@ -113,7 +113,7 @@ def generate_with_jinja2(story: dict) -> str:
 # ─── LLM plugin slot ──────────────────────────────────────────────────────────
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "none").lower()  # "openai" | "ollama" | "gemini" | "none"
-LLM_MODEL = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 
 
 async def generate_with_llm(story: dict) -> Optional[str]:
@@ -138,6 +138,8 @@ async def generate_with_llm(story: dict) -> Optional[str]:
         return await _call_openai(prompt)
     elif LLM_PROVIDER == "ollama":
         return await _call_ollama(prompt)
+    elif LLM_PROVIDER == "anthropic":
+        return await _call_anthropic(prompt)
     elif LLM_PROVIDER == "gemini":
         return await _call_gemini(prompt)
     else:
@@ -218,6 +220,33 @@ async def _call_ollama(prompt: str) -> Optional[str]:
     except Exception:
         return None  # Fall back to Jinja2
 
+
+async def _call_anthropic(prompt: str) -> Optional[str]:
+    """Call Anthropic API for Gherkin generation."""
+    try:
+        import httpx
+        api_key = os.getenv("LLM_API_KEY", "")
+        if not api_key:
+            return None
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": LLM_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1000,
+                },
+            )
+            data = resp.json()
+            return data["content"][0]["text"].strip()
+    except Exception:
+        return None  # Fall back to Jinja2
 
 async def _call_gemini(prompt: str) -> Optional[str]:
     """Call Google Gemini API for Gherkin generation."""

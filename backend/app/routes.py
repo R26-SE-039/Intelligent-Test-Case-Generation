@@ -31,6 +31,7 @@ import uuid
 from app.database import get_db
 from app.models import Project, UserStory, GherkinScenario, Priority, Status
 from app.gherkin.generator import generate_gherkin
+from app.code_gen.generator import generate_test_suite
 
 router = APIRouter(prefix="/api/v1", tags=["pipeline"])
 
@@ -545,3 +546,70 @@ async def regenerate_gherkin(
     await db.commit()
     await db.refresh(gherkin_row)
     return _gherkin_out(gherkin_row)
+
+
+# ─── Code Generation endpoints ────────────────────────────────────────────────
+
+class CodeGenRequest(BaseModel):
+    project_id: str
+    url: str
+    mode: str
+    frameworks: list[str]  # e.g., ["playwright"] or ["selenium", "playwright", "cypress"]
+
+class CodeGenResult(BaseModel):
+    framework: str
+    language: str
+    filename: str
+    code: str
+
+@router.post("/code/generate", response_model=list[CodeGenResult])
+async def generate_code(
+    body: CodeGenRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generate executable test code for the given project's Gherkin scenarios.
+    Returns code for each requested framework.
+    """
+    # Fetch all approved or existing Gherkin scenarios for the project
+    result = await db.execute(
+        select(GherkinScenario).where(GherkinScenario.project_id == body.project_id)
+    )
+    scenarios = result.scalars().all()
+    
+    if not scenarios:
+        raise HTTPException(status_code=404, detail="No Gherkin scenarios found for this project.")
+
+    gherkin_texts = [s.gherkin_text for s in scenarios if s.gherkin_text]
+    
+    if not gherkin_texts:
+        raise HTTPException(status_code=400, detail="Gherkin scenarios are empty.")
+
+    results = []
+    
+    for framework in body.frameworks:
+        try:
+            generated_code = await generate_test_suite(
+                gherkin_texts=gherkin_texts,
+                url=body.url,
+                mode=body.mode,
+                framework=framework
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to generate code for {framework}: {str(e)}")
+        
+        if not generated_code:
+            raise HTTPException(status_code=500, detail=f"Failed to generate code for {framework}: LLM returned None")
+            
+        language = "javascript" if framework == "cypress" else "python"
+        ext = "cy.js" if framework == "cypress" else "py"
+        filename = f"test_suite_{framework}.{ext}"
+        
+        results.append(CodeGenResult(
+            framework=framework,
+            language=language,
+            filename=filename,
+            code=generated_code
+        ))
+        
+    return results
