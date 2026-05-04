@@ -219,3 +219,88 @@ export async function updateTestSuiteCode(
     body: JSON.stringify({ code }),
   });
 }
+
+// ─── DOM Crawler API ──────────────────────────────────────────────────────────
+
+export interface DomElement {
+  id: string;
+  project_id: string;
+  url: string;
+  selector: string;
+  tag: string;
+  text?: string | null;
+  attributes: Record<string, string>;
+  role: string;
+  source_step?: string | null;
+  confidence?: number | null;
+  edited_by_qa: boolean;
+  approved: boolean;
+  updated_at?: string | null;
+}
+
+export interface ProbeResponse {
+  ok: boolean;
+  status: number;
+  title?: string | null;
+  error?: string | null;
+}
+
+export interface DomCrawlResponse {
+  project_id: string;
+  url: string;
+  elements: DomElement[];
+  logs: string[];
+  extracted_count: number;
+}
+
+/** Reachability check (HTTP, no browser) for the wizard's Validate button. */
+export async function probeUrl(url: string): Promise<ProbeResponse> {
+  return request<ProbeResponse>("/api/v1/dom/probe", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+}
+
+/** Run the Playwright crawler against a URL and persist extracted elements. */
+export async function crawlDom(projectId: string, url: string): Promise<DomCrawlResponse> {
+  return request<DomCrawlResponse>("/api/v1/dom/crawl", {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, url }),
+  });
+}
+
+/** List persisted DOM elements for a project (optionally a single URL). */
+export async function listDomElements(
+  projectId: string,
+  url?: string,
+): Promise<DomElement[]> {
+  const qs = new URLSearchParams({ project_id: projectId });
+  if (url) qs.set("url", url);
+  return request<DomElement[]>(`/api/v1/dom/elements?${qs.toString()}`);
+}
+
+/** Update one DOM element (sets edited_by_qa=true). */
+export async function updateDomElement(
+  elementId: string,
+  patch: Partial<Pick<DomElement, "selector" | "tag" | "text" | "attributes" | "role" | "approved">>,
+): Promise<DomElement> {
+  return request<DomElement>(`/api/v1/dom/elements/${elementId}`, {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Manually add (or upsert by role) a DOM element. */
+export async function addDomElement(
+  payload: Omit<DomElement, "id" | "edited_by_qa" | "approved" | "updated_at">,
+): Promise<DomElement> {
+  return request<DomElement>("/api/v1/dom/elements", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Delete one DOM element. */
+export async function deleteDomElement(elementId: string): Promise<void> {
+  return request<void>(`/api/v1/dom/elements/${elementId}`, { method: "DELETE" });
+}

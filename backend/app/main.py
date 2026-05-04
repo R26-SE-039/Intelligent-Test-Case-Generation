@@ -1,3 +1,14 @@
+import asyncio
+import sys
+
+# Playwright spawns the browser via asyncio subprocess transport, which
+# requires the Proactor loop on Windows. uvicorn / FastAPI on Windows can
+# end up on the Selector loop, which raises NotImplementedError when
+# subprocess_exec is called. Set the policy before anything else imports
+# asyncio internals.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware

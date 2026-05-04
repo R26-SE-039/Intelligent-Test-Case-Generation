@@ -6,10 +6,11 @@ Tables:
   - user_stories      : stories received from C1 (or entered manually), scoped to a project
   - gherkin_scenarios : AI-generated Gherkin for each story
   - test_suites       : persisted LLM-generated test code, one row per (project, framework)
+  - dom_elements      : selectors extracted from the live staging DOM, editable by QA
 """
 
 from sqlalchemy import (
-    Column, String, Boolean, Text, DateTime, Integer,
+    Column, String, Boolean, Text, DateTime, Integer, Float,
     ForeignKey, Enum as SAEnum, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -127,5 +128,39 @@ class TestSuite(Base):
     source_scenarios_hash = Column(String(64), nullable=False)
     source_scenario_ids = Column(JSONB, nullable=False, default=list)
     source_scenario_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DomElement(Base):
+    """
+    A real CSS selector extracted from the staging DOM by the Playwright crawler,
+    or manually added/edited by QA. Used as ground truth at code-generation time
+    so the LLM emits real selectors instead of <<PLACEHOLDER>>s.
+
+    Uniqueness is per (project, url, role): each named role on a page exists at
+    most once, so re-crawling can upsert cleanly.
+    """
+    __tablename__ = "dom_elements"
+    __table_args__ = (
+        UniqueConstraint("project_id", "url", "role", name="uq_dom_elements_project_url_role"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    url = Column(Text, nullable=False)              # the page URL where this element lives
+    selector = Column(Text, nullable=False)         # CSS selector, e.g. "#user-name"
+    tag = Column(String(40), nullable=False)        # INPUT, BUTTON, A, ...
+    text = Column(Text, nullable=True)              # visible text / value
+    attributes = Column(JSONB, nullable=False, default=dict)  # id, name, type, placeholder, aria-label, ...
+    role = Column(String(120), nullable=False)      # semantic label: username_input, login_button, ...
+    source_step = Column(Text, nullable=True)       # the Gherkin step (or heuristic) that produced it
+    confidence = Column(Float, nullable=True)       # 0..1 — how sure the crawler is about the role mapping
+    edited_by_qa = Column(Boolean, default=False)
+    approved = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

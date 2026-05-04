@@ -30,9 +30,10 @@ import json
 import uuid
 
 from app.database import get_db
-from app.models import Project, UserStory, GherkinScenario, TestSuite, Priority, Status
+from app.models import Project, UserStory, GherkinScenario, TestSuite, DomElement, Priority, Status
 from app.gherkin.generator import generate_gherkin
 from app.code_gen.generator import generate_test_suite
+from app.dom_crawler import crawl_url, probe_url
 
 router = APIRouter(prefix="/api/v1", tags=["pipeline"])
 
@@ -758,3 +759,301 @@ async def update_test_suite_code(
     )
     current_hash, _, _ = _scenarios_fingerprint(scenarios_q.scalars().all())
     return _suite_out(suite, current_hash)
+
+
+# ─── DOM crawler endpoints ────────────────────────────────────────────────────
+
+class ProbeRequest(BaseModel):
+    url: str
+
+
+class ProbeResponse(BaseModel):
+    ok: bool
+    status: int
+    title: Optional[str] = None
+    error: Optional[str] = None
+
+
+class DomCrawlRequest(BaseModel):
+    project_id: str
+    url: str
+
+
+class DomElementOut(BaseModel):
+    id: str
+    project_id: str
+    url: str
+    selector: str
+    tag: str
+    text: Optional[str] = None
+    attributes: dict
+    role: str
+    source_step: Optional[str] = None
+    confidence: Optional[float] = None
+    edited_by_qa: bool
+    approved: bool
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DomElementUpsertIn(BaseModel):
+    project_id: str
+    url: str
+    selector: str
+    tag: str = "DIV"
+    text: Optional[str] = None
+    attributes: dict = {}
+    role: str
+    source_step: Optional[str] = "manual"
+    confidence: Optional[float] = 1.0
+
+
+class DomElementUpdateIn(BaseModel):
+    selector: Optional[str] = None
+    tag: Optional[str] = None
+    text: Optional[str] = None
+    attributes: Optional[dict] = None
+    role: Optional[str] = None
+    approved: Optional[bool] = None
+
+
+class DomCrawlResponse(BaseModel):
+    project_id: str
+    url: str
+    elements: list[DomElementOut]
+    logs: list[str]
+    extracted_count: int
+
+
+def _dom_out(d: DomElement) -> DomElementOut:
+    return DomElementOut(
+        id=str(d.id),
+        project_id=str(d.project_id),
+        url=d.url,
+        selector=d.selector,
+        tag=d.tag,
+        text=d.text,
+        attributes=d.attributes or {},
+        role=d.role,
+        source_step=d.source_step,
+        confidence=d.confidence,
+        edited_by_qa=bool(d.edited_by_qa),
+        approved=bool(d.approved),
+        updated_at=d.updated_at.isoformat() if d.updated_at else None,
+    )
+
+
+@router.post("/dom/probe", response_model=ProbeResponse)
+async def probe_dom_url(body: ProbeRequest):
+    """
+    Reachability check used by the wizard's Validate button.
+    Plain HTTP GET — no browser, no DB write.
+    """
+    if not body.url or not body.url.startswith(("http://", "https://")):
+        return ProbeResponse(ok=False, status=0, error="URL must start with http:// or https://")
+    result = await probe_url(body.url)
+    return ProbeResponse(
+        ok=result.ok,
+        status=result.status,
+        title=result.title,
+        error=result.error,
+    )
+
+
+@router.post("/dom/crawl", response_model=DomCrawlResponse)
+async def crawl_dom(body: DomCrawlRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Run the Playwright crawler against a URL and persist extracted elements.
+    Idempotent per (project_id, url): existing rows for the same page that
+    were NOT edited by QA are replaced; edited rows are preserved.
+    """
+    proj_q = await db.execute(select(Project).where(Project.id == body.project_id))
+    if not proj_q.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not body.url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
+
+    try:
+        extracted, logs = await crawl_url(body.url)
+    except NotImplementedError:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Crawler failed: asyncio subprocess unsupported on this event loop. "
+                "Restart the backend so the Proactor loop policy in app/main.py takes effect."
+            ),
+        )
+    except Exception as e:
+        msg = str(e).strip() or repr(e)
+        raise HTTPException(status_code=500, detail=f"Crawler failed: {type(e).__name__}: {msg}")
+
+    # Drop only auto-generated rows for this (project, url) so QA edits survive a re-crawl.
+    await db.execute(
+        delete(DomElement).where(
+            DomElement.project_id == body.project_id,
+            DomElement.url == body.url,
+            DomElement.edited_by_qa == False,  # noqa: E712
+        )
+    )
+
+    # Existing edited rows hold their roles — skip those role names so we don't
+    # collide on the unique (project, url, role) constraint.
+    edited_q = await db.execute(
+        select(DomElement.role).where(
+            DomElement.project_id == body.project_id,
+            DomElement.url == body.url,
+            DomElement.edited_by_qa == True,  # noqa: E712
+        )
+    )
+    reserved = {r for (r,) in edited_q.all()}
+
+    saved: list[DomElement] = []
+    for el in extracted:
+        if el.role in reserved:
+            continue
+        row = DomElement(
+            id=uuid.uuid4(),
+            project_id=body.project_id,
+            url=body.url,
+            selector=el.selector,
+            tag=el.tag,
+            text=el.text,
+            attributes=el.attributes,
+            role=el.role,
+            source_step=el.source_step,
+            confidence=el.confidence,
+        )
+        db.add(row)
+        saved.append(row)
+
+    await db.commit()
+    for r in saved:
+        await db.refresh(r)
+
+    # Return the full current set (saved + preserved edits) sorted by role
+    full_q = await db.execute(
+        select(DomElement)
+        .where(DomElement.project_id == body.project_id, DomElement.url == body.url)
+        .order_by(DomElement.role.asc())
+    )
+    full = full_q.scalars().all()
+
+    return DomCrawlResponse(
+        project_id=body.project_id,
+        url=body.url,
+        elements=[_dom_out(d) for d in full],
+        logs=logs,
+        extracted_count=len(extracted),
+    )
+
+
+@router.get("/dom/elements", response_model=list[DomElementOut])
+async def list_dom_elements(
+    project_id: str,
+    url: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """List DOM elements for a project, optionally filtered to a single URL."""
+    stmt = select(DomElement).where(DomElement.project_id == project_id)
+    if url:
+        stmt = stmt.where(DomElement.url == url)
+    stmt = stmt.order_by(DomElement.url.asc(), DomElement.role.asc())
+    result = await db.execute(stmt)
+    return [_dom_out(d) for d in result.scalars().all()]
+
+
+@router.post("/dom/elements", response_model=DomElementOut)
+async def add_dom_element(body: DomElementUpsertIn, db: AsyncSession = Depends(get_db)):
+    """
+    Manually add (or upsert by role) a DOM element. Marked edited_by_qa=True so
+    re-crawling won't overwrite it.
+    """
+    proj_q = await db.execute(select(Project).where(Project.id == body.project_id))
+    if not proj_q.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    existing_q = await db.execute(
+        select(DomElement).where(
+            DomElement.project_id == body.project_id,
+            DomElement.url == body.url,
+            DomElement.role == body.role,
+        )
+    )
+    existing = existing_q.scalar_one_or_none()
+
+    if existing:
+        existing.selector = body.selector
+        existing.tag = body.tag
+        existing.text = body.text
+        existing.attributes = body.attributes or {}
+        existing.source_step = body.source_step
+        existing.confidence = body.confidence
+        existing.edited_by_qa = True
+        db.add(existing)
+        await db.commit()
+        await db.refresh(existing)
+        return _dom_out(existing)
+
+    row = DomElement(
+        id=uuid.uuid4(),
+        project_id=body.project_id,
+        url=body.url,
+        selector=body.selector,
+        tag=body.tag,
+        text=body.text,
+        attributes=body.attributes or {},
+        role=body.role,
+        source_step=body.source_step,
+        confidence=body.confidence,
+        edited_by_qa=True,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _dom_out(row)
+
+
+@router.put("/dom/elements/{element_id}", response_model=DomElementOut)
+async def update_dom_element(
+    element_id: str,
+    body: DomElementUpdateIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit one DOM element. Always sets edited_by_qa=True."""
+    result = await db.execute(select(DomElement).where(DomElement.id == element_id))
+    el = result.scalar_one_or_none()
+    if not el:
+        raise HTTPException(status_code=404, detail="DOM element not found")
+
+    if body.selector is not None:
+        el.selector = body.selector
+    if body.tag is not None:
+        el.tag = body.tag
+    if body.text is not None:
+        el.text = body.text
+    if body.attributes is not None:
+        el.attributes = body.attributes
+    if body.role is not None:
+        el.role = body.role
+    if body.approved is not None:
+        el.approved = body.approved
+    el.edited_by_qa = True
+
+    db.add(el)
+    await db.commit()
+    await db.refresh(el)
+    return _dom_out(el)
+
+
+@router.delete("/dom/elements/{element_id}", status_code=204)
+async def delete_dom_element(element_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete one DOM element."""
+    result = await db.execute(select(DomElement).where(DomElement.id == element_id))
+    el = result.scalar_one_or_none()
+    if not el:
+        raise HTTPException(status_code=404, detail="DOM element not found")
+    await db.execute(delete(DomElement).where(DomElement.id == element_id))
+    await db.commit()
