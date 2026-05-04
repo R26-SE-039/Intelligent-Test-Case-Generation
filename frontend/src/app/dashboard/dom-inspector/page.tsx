@@ -19,6 +19,9 @@ import {
   X,
   Save,
   Terminal,
+  Shield,
+  ChevronDown,
+  Upload,
 } from "lucide-react";
 import {
   crawlDom,
@@ -26,7 +29,11 @@ import {
   updateDomElement,
   addDomElement,
   deleteDomElement,
+  bulkApproveDomElements,
+  openCrawlLogStream,
   type DomElement,
+  type AuthStrategy,
+  type ManualAuthConfig,
 } from "@/lib/api";
 import { useProject } from "@/lib/project-context";
 
@@ -53,6 +60,27 @@ function DomInspectorContent() {
 
   const [newRow, setNewRow] = useState<{ selector: string; role: string; tag: string } | null>(null);
   const [addingNew, setAddingNew] = useState(false);
+  const [bulkPending, setBulkPending] = useState(false);
+
+  // Auth strategy state — defaults to "background" (parse Gherkin Background).
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authStrategy, setAuthStrategy] = useState<AuthStrategy>("background");
+  const [manualAuth, setManualAuth] = useState<ManualAuthConfig>({
+    login_url: "",
+    username_selector: "",
+    username_value: "",
+    password_selector: "",
+    password_value: "",
+    submit_selector: "",
+  });
+  const [storageStateRaw, setStorageStateRaw] = useState<string>("");
+  const [storageStateName, setStorageStateName] = useState<string | null>(null);
+
+  const [authMeta, setAuthMeta] = useState<{
+    used: string;
+    replayed: number;
+    unmatched: string[];
+  } | null>(null);
 
   // Load saved elements on mount — no crawl, no LLM cost.
   useEffect(() => {
@@ -81,17 +109,77 @@ function DomInspectorContent() {
     setIsCrawling(true);
     setError(null);
     setLogs(["Starting Playwright crawler…"]);
+    setAuthMeta(null);
+
+    let parsedStorageState: unknown | undefined;
+    if (authStrategy === "storage_state") {
+      if (!storageStateRaw.trim()) {
+        setError("Upload a Playwright storageState JSON before crawling");
+        setIsCrawling(false);
+        return;
+      }
+      try {
+        parsedStorageState = JSON.parse(storageStateRaw);
+      } catch {
+        setError("storageState file is not valid JSON");
+        setIsCrawling(false);
+        return;
+      }
+    }
+
+    // Phase 3: open the live log WebSocket BEFORE the POST so we don't miss
+    // the first lines. Use a fresh run_id per crawl.
+    const runId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `crawl-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    let ws: WebSocket | null = null;
     try {
-      const result = await crawlDom(activeProject.id, urlParam);
+      ws = openCrawlLogStream(
+        runId,
+        (line) => setLogs((prev) => [...prev, line]),
+        () => {
+          // server signalled end-of-run; nothing extra to do here
+        },
+      );
+    } catch {
+      // If WS fails to open we still continue with buffered logs from the POST.
+      ws = null;
+    }
+
+    try {
+      const result = await crawlDom(activeProject.id, urlParam, {
+        authStrategy,
+        manualAuth: authStrategy === "manual" ? manualAuth : undefined,
+        storageState: authStrategy === "storage_state" ? parsedStorageState : undefined,
+        runId,
+      });
       setElements(result.elements);
+      // If WS streamed lines, server's buffered list matches — replace to
+      // dedupe and ensure final ordering. Otherwise we already have them.
       setLogs(result.logs);
+      setAuthMeta({
+        used: result.auth_strategy_used,
+        replayed: result.auth_steps_replayed,
+        unmatched: result.unmatched_background_steps ?? [],
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Crawl failed";
       setError(message);
       setLogs((prev) => [...prev, `ERROR: ${message}`]);
     } finally {
       setIsCrawling(false);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.close(); } catch { /* ignore */ }
+      }
     }
+  };
+
+  const handleStorageStateUpload = async (file: File) => {
+    setStorageStateName(file.name);
+    const text = await file.text();
+    setStorageStateRaw(text);
   };
 
   const startEdit = (el: DomElement) => {
@@ -191,6 +279,20 @@ function DomInspectorContent() {
     }
   };
 
+  const bulkApprove = async (approve: boolean) => {
+    if (!activeProject) return;
+    setBulkPending(true);
+    setError(null);
+    try {
+      const updated = await bulkApproveDomElements(activeProject.id, approve, urlParam);
+      setElements(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Bulk approve failed");
+    } finally {
+      setBulkPending(false);
+    }
+  };
+
   const continueHref = `/dashboard/code-review?mode=${modeParam}&framework=${fwParam}&url=${encodeURIComponent(urlParam)}`;
 
   const elementCount = elements.length;
@@ -242,9 +344,187 @@ function DomInspectorContent() {
         </div>
       )}
 
+      {/* Auth strategy panel */}
+      <div className="mx-6 mt-4 rounded-xl border border-slate-200 bg-white shadow-sm">
+        <button
+          onClick={() => setAuthOpen((v) => !v)}
+          className="w-full flex items-center justify-between px-5 py-3 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-purple-600" />
+            <span className="text-sm font-semibold text-slate-800">Auth strategy</span>
+            <span className="text-xs text-slate-500 ml-1">
+              ({authStrategy === "background"
+                ? "Replay Gherkin Background — default"
+                : authStrategy === "none"
+                ? "No auth — public page"
+                : authStrategy === "manual"
+                ? "Manual form credentials"
+                : "Uploaded storageState"})
+            </span>
+            {authMeta && (
+              <span className="ml-2 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">
+                last crawl: {authMeta.used} · {authMeta.replayed} steps
+              </span>
+            )}
+          </div>
+          <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${authOpen ? "rotate-180" : ""}`} />
+        </button>
+        {authOpen && (
+          <div className="px-5 pb-5 border-t border-slate-100 pt-4 space-y-4">
+            {/* Strategy radio */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {([
+                { id: "background", label: "Gherkin Background (default)", hint: "Parses login steps from your project's Background block." },
+                { id: "none", label: "No auth", hint: "Public pages only." },
+                { id: "manual", label: "Manual form", hint: "Provide selectors + creds." },
+                { id: "storage_state", label: "storageState upload", hint: "For SSO / 2FA — record once in Playwright codegen." },
+              ] as const).map((opt) => (
+                <label
+                  key={opt.id}
+                  className={`flex items-start gap-2 p-3 border rounded-lg cursor-pointer transition-all ${
+                    authStrategy === opt.id
+                      ? "border-purple-500 bg-purple-50"
+                      : "border-slate-200 bg-white hover:border-slate-300"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="auth-strategy"
+                    value={opt.id}
+                    checked={authStrategy === opt.id}
+                    onChange={() => setAuthStrategy(opt.id)}
+                    className="mt-0.5 accent-purple-600"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-slate-800">{opt.label}</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">{opt.hint}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            {/* Manual auth form */}
+            {authStrategy === "manual" && (
+              <div className="p-4 border border-slate-200 bg-slate-50 rounded-lg space-y-3">
+                <p className="text-[11px] text-slate-500">
+                  Selectors are <strong>optional</strong> — leave them blank and the crawler will auto-detect
+                  the form fields using the same universal locators as Gherkin Background mode. Just provide
+                  the login URL + credentials and it should work on any standard form.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="text-xs text-slate-600">
+                    Login URL <span className="text-slate-400">(recommended)</span>
+                    <input
+                      value={manualAuth.login_url ?? ""}
+                      onChange={(e) => setManualAuth({ ...manualAuth, login_url: e.target.value })}
+                      placeholder="https://app.example.com/login"
+                      className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-mono"
+                    />
+                  </label>
+                  <label className="text-xs text-slate-600">
+                    Submit selector <span className="text-slate-400">(auto if blank)</span>
+                    <input
+                      value={manualAuth.submit_selector ?? ""}
+                      onChange={(e) => setManualAuth({ ...manualAuth, submit_selector: e.target.value })}
+                      placeholder='button[type="submit"], input[type="submit"]'
+                      className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-mono"
+                    />
+                  </label>
+                  <label className="text-xs text-slate-600">
+                    Username selector <span className="text-slate-400">(auto if blank)</span>
+                    <input
+                      value={manualAuth.username_selector ?? ""}
+                      onChange={(e) => setManualAuth({ ...manualAuth, username_selector: e.target.value })}
+                      placeholder="#user-name (or leave blank)"
+                      className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-mono"
+                    />
+                  </label>
+                  <label className="text-xs text-slate-600">
+                    Username value <span className="text-red-500">*</span>
+                    <input
+                      value={manualAuth.username_value ?? ""}
+                      onChange={(e) => setManualAuth({ ...manualAuth, username_value: e.target.value })}
+                      placeholder="standard_user"
+                      className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded text-xs"
+                    />
+                  </label>
+                  <label className="text-xs text-slate-600">
+                    Password selector <span className="text-slate-400">(auto if blank)</span>
+                    <input
+                      value={manualAuth.password_selector ?? ""}
+                      onChange={(e) => setManualAuth({ ...manualAuth, password_selector: e.target.value })}
+                      placeholder='input[type="password"]'
+                      className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-mono"
+                    />
+                  </label>
+                  <label className="text-xs text-slate-600">
+                    Password value <span className="text-red-500">*</span>
+                    <input
+                      type="password"
+                      value={manualAuth.password_value ?? ""}
+                      onChange={(e) => setManualAuth({ ...manualAuth, password_value: e.target.value })}
+                      placeholder="secret_sauce"
+                      className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded text-xs"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* storageState upload */}
+            {authStrategy === "storage_state" && (
+              <div className="p-4 border border-slate-200 bg-slate-50 rounded-lg">
+                <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                  <Upload className="w-4 h-4 text-purple-600" />
+                  <span className="px-3 py-1.5 bg-white border border-slate-300 rounded hover:bg-slate-100 text-xs">
+                    {storageStateName ? `Replace (${storageStateName})` : "Upload storageState.json"}
+                  </span>
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleStorageStateUpload(f);
+                    }}
+                    className="hidden"
+                  />
+                </label>
+                <p className="text-[11px] text-slate-500 mt-2">
+                  Generate one with <code className="font-mono bg-white border border-slate-200 px-1 rounded">playwright codegen --save-storage state.json</code>
+                  . Cookies + localStorage are loaded into the crawler's browser context.
+                </p>
+                {storageStateRaw && (
+                  <p className="text-[11px] text-emerald-700 mt-1.5">
+                    ✓ Loaded {storageStateRaw.length.toLocaleString()} bytes
+                  </p>
+                )}
+              </div>
+            )}
+
+            {authMeta?.unmatched && authMeta.unmatched.length > 0 && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                <p className="font-semibold mb-1 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {authMeta.unmatched.length} Background step(s) couldn't be auto-translated:
+                </p>
+                <ul className="list-disc ml-5 space-y-0.5 font-mono">
+                  {authMeta.unmatched.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-[11px] text-amber-700">
+                  Switch to <strong>Manual form</strong> if these matter for reaching the page you want crawled.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5 p-6">
         {/* Element table */}
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col min-h-[500px]">
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col min-h-125">
           <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
             <div className="flex items-center gap-3">
               <h2 className="text-sm font-semibold text-slate-800">Extracted Elements</h2>
@@ -253,6 +533,26 @@ function DomInspectorContent() {
               </span>
             </div>
             <div className="flex items-center gap-2">
+              {elementCount > 0 && approvedCount < elementCount && (
+                <button
+                  onClick={() => bulkApprove(true)}
+                  disabled={bulkPending}
+                  className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 px-3 py-1.5 rounded-md transition-all disabled:opacity-50"
+                >
+                  {bulkPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                  Approve all
+                </button>
+              )}
+              {elementCount > 0 && approvedCount === elementCount && (
+                <button
+                  onClick={() => bulkApprove(false)}
+                  disabled={bulkPending}
+                  className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded-md transition-all disabled:opacity-50"
+                >
+                  {bulkPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                  Unapprove all
+                </button>
+              )}
               <button
                 onClick={beginAdd}
                 disabled={!activeProject || !urlParam}
@@ -490,7 +790,7 @@ function DomInspectorContent() {
         </div>
 
         {/* Crawl log panel */}
-        <div className="rounded-xl border border-slate-200 bg-slate-900 shadow-sm flex flex-col min-h-[500px]">
+        <div className="rounded-xl border border-slate-200 bg-slate-900 shadow-sm flex flex-col min-h-125">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700/50">
             <div className="relative w-2 h-2">
               <span

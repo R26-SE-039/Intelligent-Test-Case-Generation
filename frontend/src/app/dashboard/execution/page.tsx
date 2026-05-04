@@ -120,9 +120,9 @@ export default function ExecutionPage() {
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full tracking-wider">
-                S5
+                S6
               </span>
-              <span className="text-xs text-slate-500">Pipeline Stage 5 of 5</span>
+              <span className="text-xs text-slate-500">Pipeline Stage 6 of 6</span>
             </div>
             <h1 className="text-2xl font-bold text-slate-900">Execution &amp; Report</h1>
             <p className="text-slate-600 text-sm mt-0.5">

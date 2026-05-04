@@ -33,7 +33,7 @@ from app.database import get_db
 from app.models import Project, UserStory, GherkinScenario, TestSuite, DomElement, Priority, Status
 from app.gherkin.generator import generate_gherkin
 from app.code_gen.generator import generate_test_suite
-from app.dom_crawler import crawl_url, probe_url
+from app.dom_crawler import crawl_url, probe_url, build_auth_plan, AuthPlan, log_broker
 
 router = APIRouter(prefix="/api/v1", tags=["pipeline"])
 
@@ -604,6 +604,27 @@ def _scenarios_fingerprint(scenarios: list[GherkinScenario]) -> tuple[str, list[
     return h.hexdigest(), [sid for sid, _ in pairs], len(pairs)
 
 
+def _dom_elements_fingerprint(elements: list[DomElement]) -> str:
+    """
+    Deterministic fingerprint of (role, selector) tuples for the elements
+    actually used during code generation. Combined with the scenarios hash so
+    the Code Review staleness banner fires when QA edits selectors too.
+    """
+    pairs = sorted(((e.role, e.selector or "") for e in elements), key=lambda p: p[0])
+    h = hashlib.sha256()
+    for role, sel in pairs:
+        h.update(role.encode())
+        h.update(b"\x00")
+        h.update(sel.encode())
+        h.update(b"\x00")
+    return h.hexdigest()
+
+
+def _combined_inputs_hash(scenarios_hash: str, dom_hash: str) -> str:
+    """One hash that covers both Gherkin scenarios and DOM elements."""
+    return hashlib.sha256(f"{scenarios_hash}:{dom_hash}".encode()).hexdigest()
+
+
 def _suite_out(s: TestSuite, current_hash: str) -> TestSuiteOut:
     return TestSuiteOut(
         id=str(s.id),
@@ -622,14 +643,37 @@ def _suite_out(s: TestSuite, current_hash: str) -> TestSuiteOut:
     )
 
 
+async def _current_combined_hash(db: AsyncSession, project_id: str, url: str) -> str:
+    """
+    Compute the combined fingerprint of the inputs that would be used to
+    regenerate test code right now. Used by both POST /code/generate (to store
+    in the new suite row) and GET /code/suites (to mark older rows stale).
+    """
+    sc_q = await db.execute(
+        select(GherkinScenario).where(GherkinScenario.project_id == project_id)
+    )
+    scenarios_hash, _, _ = _scenarios_fingerprint(sc_q.scalars().all())
+
+    el_q = await db.execute(
+        select(DomElement).where(
+            DomElement.project_id == project_id,
+            DomElement.url == url,
+        )
+    )
+    dom_hash = _dom_elements_fingerprint(el_q.scalars().all())
+
+    return _combined_inputs_hash(scenarios_hash, dom_hash)
+
+
 @router.post("/code/generate", response_model=list[TestSuiteOut])
 async def generate_code(
     body: CodeGenRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Generate executable test code from the project's Gherkin scenarios and
-    upsert one TestSuite row per framework. Idempotent per (project, framework).
+    Generate executable test code from the project's Gherkin scenarios + crawled
+    DOM elements, then upsert one TestSuite row per framework. Idempotent per
+    (project, framework).
     """
     result = await db.execute(
         select(GherkinScenario).where(GherkinScenario.project_id == body.project_id)
@@ -643,7 +687,32 @@ async def generate_code(
     if not gherkin_texts:
         raise HTTPException(status_code=400, detail="Gherkin scenarios are empty.")
 
-    current_hash, scenario_ids, scenario_count = _scenarios_fingerprint(scenarios)
+    scenarios_hash, scenario_ids, scenario_count = _scenarios_fingerprint(scenarios)
+
+    # Pull DOM elements for this URL (Mode B). All extracted elements feed the
+    # LLM — `approved` is a QA quality marker, not a filter, so partial approval
+    # doesn't silently drop the unapproved ones.
+    elements: list[DomElement] = []
+    dom_payload: list[dict] = []
+    if body.mode == "dom":
+        el_q = await db.execute(
+            select(DomElement)
+            .where(DomElement.project_id == body.project_id, DomElement.url == body.url)
+            .order_by(DomElement.role.asc())
+        )
+        elements = list(el_q.scalars().all())
+        dom_payload = [
+            {
+                "role": e.role,
+                "selector": e.selector,
+                "tag": e.tag,
+                "text": e.text or "",
+            }
+            for e in elements
+        ]
+
+    dom_hash = _dom_elements_fingerprint(elements)
+    combined_hash = _combined_inputs_hash(scenarios_hash, dom_hash)
 
     saved: list[TestSuite] = []
     for framework in body.frameworks:
@@ -653,6 +722,7 @@ async def generate_code(
                 url=body.url,
                 mode=body.mode,
                 framework=framework,
+                dom_elements=dom_payload or None,
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate code for {framework}: {str(e)}")
@@ -676,7 +746,7 @@ async def generate_code(
             existing.filename = filename
             existing.mode = body.mode
             existing.url = body.url
-            existing.source_scenarios_hash = current_hash
+            existing.source_scenarios_hash = combined_hash
             existing.source_scenario_ids = scenario_ids
             existing.source_scenario_count = scenario_count
             db.add(existing)
@@ -691,7 +761,7 @@ async def generate_code(
                 code=generated_code,
                 mode=body.mode,
                 url=body.url,
-                source_scenarios_hash=current_hash,
+                source_scenarios_hash=combined_hash,
                 source_scenario_ids=scenario_ids,
                 source_scenario_count=scenario_count,
             )
@@ -702,7 +772,7 @@ async def generate_code(
     for s in saved:
         await db.refresh(s)
 
-    return [_suite_out(s, current_hash) for s in saved]
+    return [_suite_out(s, combined_hash) for s in saved]
 
 
 @router.get("/code/suites", response_model=list[TestSuiteOut])
@@ -712,8 +782,8 @@ async def list_test_suites(
 ):
     """
     Load persisted test suites for a project — no LLM calls.
-    Each suite carries an `is_stale` flag set when the project's current
-    Gherkin scenarios no longer match the inputs that produced the suite.
+    `is_stale` fires when EITHER the Gherkin scenarios OR the crawled DOM
+    elements (for the suite's recorded URL) have changed since generation.
     """
     suites_q = await db.execute(
         select(TestSuite)
@@ -725,12 +795,15 @@ async def list_test_suites(
     if not suites:
         return []
 
-    scenarios_q = await db.execute(
-        select(GherkinScenario).where(GherkinScenario.project_id == project_id)
-    )
-    current_hash, _, _ = _scenarios_fingerprint(scenarios_q.scalars().all())
-
-    return [_suite_out(s, current_hash) for s in suites]
+    # Cache per-URL hash so we don't re-query DOM elements once per suite when
+    # they all share a URL (the common case).
+    hash_cache: dict[str, str] = {}
+    out: list[TestSuiteOut] = []
+    for s in suites:
+        if s.url not in hash_cache:
+            hash_cache[s.url] = await _current_combined_hash(db, project_id, s.url)
+        out.append(_suite_out(s, hash_cache[s.url]))
+    return out
 
 
 @router.put("/code/suites/{suite_id}", response_model=TestSuiteOut)
@@ -754,10 +827,7 @@ async def update_test_suite_code(
     await db.commit()
     await db.refresh(suite)
 
-    scenarios_q = await db.execute(
-        select(GherkinScenario).where(GherkinScenario.project_id == suite.project_id)
-    )
-    current_hash, _, _ = _scenarios_fingerprint(scenarios_q.scalars().all())
+    current_hash = await _current_combined_hash(db, str(suite.project_id), suite.url)
     return _suite_out(suite, current_hash)
 
 
@@ -774,9 +844,23 @@ class ProbeResponse(BaseModel):
     error: Optional[str] = None
 
 
+class ManualAuthConfig(BaseModel):
+    """Phase 6 fallback: explicit selectors + creds when Background can't drive login."""
+    login_url: Optional[str] = None
+    username_selector: Optional[str] = None
+    username_value: Optional[str] = None
+    password_selector: Optional[str] = None
+    password_value: Optional[str] = None
+    submit_selector: Optional[str] = None
+
+
 class DomCrawlRequest(BaseModel):
     project_id: str
     url: str
+    auth_strategy: str = "background"     # background | none | manual | storage_state
+    manual_auth: Optional[ManualAuthConfig] = None
+    storage_state: Optional[dict] = None  # Playwright storageState JSON
+    run_id: Optional[str] = None          # frontend-supplied; matches /ws/dom/crawl/{id} subscriber
 
 
 class DomElementOut(BaseModel):
@@ -825,6 +909,9 @@ class DomCrawlResponse(BaseModel):
     elements: list[DomElementOut]
     logs: list[str]
     extracted_count: int
+    auth_strategy_used: str = "none"
+    auth_steps_replayed: int = 0
+    unmatched_background_steps: list[str] = []
 
 
 def _dom_out(d: DomElement) -> DomElementOut:
@@ -862,6 +949,38 @@ async def probe_dom_url(body: ProbeRequest):
     )
 
 
+def _manual_auth_to_plan(cfg: ManualAuthConfig) -> AuthPlan:
+    """
+    Translate the Phase-6 manual auth form into the same Action sequence the
+    Background parser produces, so the crawler's replay loop is unchanged.
+
+    Empty selectors fall back to the generic universal locators used by the
+    Background path — so the user can supply just username + password values
+    and the crawler will find the form fields itself.
+    """
+    from app.dom_crawler.auth import (
+        Action, USERNAME_LOCATOR, PASSWORD_LOCATOR, LOGIN_BUTTON_LOCATOR,
+    )
+    actions: list = []
+    if cfg.login_url:
+        actions.append(Action("goto", cfg.login_url, None, f"goto {cfg.login_url}"))
+    if cfg.username_value:
+        sel = (cfg.username_selector or "").strip() or USERNAME_LOCATOR
+        actions.append(Action(
+            "fill", sel, cfg.username_value,
+            f"fill username '{cfg.username_value}'",
+        ))
+    if cfg.password_value:
+        sel = (cfg.password_selector or "").strip() or PASSWORD_LOCATOR
+        actions.append(Action("fill", sel, cfg.password_value, "fill password"))
+    sub_sel = (cfg.submit_selector or "").strip() or LOGIN_BUTTON_LOCATOR
+    actions.append(Action("click", sub_sel, None, "click submit"))
+    plan = AuthPlan()
+    plan.actions = actions
+    plan.raw_steps = [a.description for a in actions]
+    return plan
+
+
 @router.post("/dom/crawl", response_model=DomCrawlResponse)
 async def crawl_dom(body: DomCrawlRequest, db: AsyncSession = Depends(get_db)):
     """
@@ -876,9 +995,44 @@ async def crawl_dom(body: DomCrawlRequest, db: AsyncSession = Depends(get_db)):
     if not body.url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
 
+    # Assemble the auth strategy.
+    auth_plan: Optional[AuthPlan] = None
+    storage_state = None
+    strategy_used = body.auth_strategy
+
+    if body.auth_strategy == "background":
+        sc_q = await db.execute(
+            select(GherkinScenario).where(GherkinScenario.project_id == body.project_id)
+        )
+        gherkin_texts = [s.gherkin_text for s in sc_q.scalars().all() if s.gherkin_text]
+        plan = build_auth_plan(gherkin_texts)
+        if not plan.is_empty:
+            auth_plan = plan
+        else:
+            strategy_used = "none"  # no Background found
+    elif body.auth_strategy == "manual":
+        if not body.manual_auth:
+            raise HTTPException(status_code=400, detail="manual_auth config is required for strategy 'manual'")
+        auth_plan = _manual_auth_to_plan(body.manual_auth)
+    elif body.auth_strategy == "storage_state":
+        if not body.storage_state:
+            raise HTTPException(status_code=400, detail="storage_state JSON is required for strategy 'storage_state'")
+        storage_state = body.storage_state
+    elif body.auth_strategy == "none":
+        pass
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown auth_strategy '{body.auth_strategy}'")
+
     try:
-        extracted, logs = await crawl_url(body.url)
+        extracted, logs = await crawl_url(
+            body.url,
+            auth_plan=auth_plan,
+            storage_state=storage_state,
+            run_id=body.run_id,
+        )
     except NotImplementedError:
+        if body.run_id:
+            log_broker.close(body.run_id)
         raise HTTPException(
             status_code=500,
             detail=(
@@ -887,8 +1041,14 @@ async def crawl_dom(body: DomCrawlRequest, db: AsyncSession = Depends(get_db)):
             ),
         )
     except Exception as e:
+        if body.run_id:
+            log_broker.close(body.run_id)
         msg = str(e).strip() or repr(e)
         raise HTTPException(status_code=500, detail=f"Crawler failed: {type(e).__name__}: {msg}")
+    finally:
+        # Sentinel — tells the WS subscriber the run is over so it can close cleanly.
+        if body.run_id:
+            log_broker.close(body.run_id)
 
     # Drop only auto-generated rows for this (project, url) so QA edits survive a re-crawl.
     await db.execute(
@@ -947,6 +1107,9 @@ async def crawl_dom(body: DomCrawlRequest, db: AsyncSession = Depends(get_db)):
         elements=[_dom_out(d) for d in full],
         logs=logs,
         extracted_count=len(extracted),
+        auth_strategy_used=strategy_used,
+        auth_steps_replayed=len(auth_plan.actions) if auth_plan else 0,
+        unmatched_background_steps=auth_plan.unmatched_steps if auth_plan else [],
     )
 
 
@@ -1057,3 +1220,29 @@ async def delete_dom_element(element_id: str, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail="DOM element not found")
     await db.execute(delete(DomElement).where(DomElement.id == element_id))
     await db.commit()
+
+
+class BulkApproveIn(BaseModel):
+    project_id: str
+    url: Optional[str] = None
+    approved: bool = True
+
+
+@router.post("/dom/elements/bulk-approve", response_model=list[DomElementOut])
+async def bulk_approve_dom_elements(
+    body: BulkApproveIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Toggle approval for every element in a project (optionally scoped to a URL)."""
+    stmt = select(DomElement).where(DomElement.project_id == body.project_id)
+    if body.url:
+        stmt = stmt.where(DomElement.url == body.url)
+    result = await db.execute(stmt.order_by(DomElement.role.asc()))
+    rows = result.scalars().all()
+    for r in rows:
+        r.approved = body.approved
+        db.add(r)
+    await db.commit()
+    for r in rows:
+        await db.refresh(r)
+    return [_dom_out(r) for r in rows]

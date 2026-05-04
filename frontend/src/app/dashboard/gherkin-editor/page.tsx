@@ -61,12 +61,16 @@ export default function GherkinEditorPage() {
     setError(null);
 
     try {
-      // Load all stories for the project
+      // Load all stories for the project, then fetch each story's Gherkin in
+      // parallel — one slow scenario shouldn't gate the rest.
       const storyList = await listStories(activeProject.id);
+      const gherkins = await Promise.all(
+        storyList.map((s) => getGherkinForStory(activeProject.id, s.id).catch(() => null)),
+      );
 
       const loaded: GherkinStory[] = [];
-      for (const s of storyList) {
-        const gherkin = await getGherkinForStory(activeProject.id, s.id);
+      storyList.forEach((s, i) => {
+        const gherkin = gherkins[i];
         if (gherkin) {
           loaded.push({
             id: s.id,
@@ -75,10 +79,10 @@ export default function GherkinEditorPage() {
             content: gherkin.gherkin_text,
             edited: gherkin.edited_by_qa,
             generator: gherkin.generator,
-            approved: gherkin.approved,  // persisted from DB ✅
+            approved: gherkin.approved,
           });
         }
-      }
+      });
 
       if (loaded.length > 0) {
         setStories(loaded);
@@ -88,7 +92,9 @@ export default function GherkinEditorPage() {
       }
     } catch (err) {
       console.error("Failed to load Gherkin:", err);
-      setError("Could not load Gherkin from backend. Is the server running?");
+      const message =
+        err instanceof Error ? err.message : "Could not load Gherkin from backend.";
+      setError(`${message} Is the backend running on the configured port?`);
     } finally {
       setIsLoading(false);
     }

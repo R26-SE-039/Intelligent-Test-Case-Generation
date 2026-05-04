@@ -9,11 +9,17 @@ async def generate_test_suite(
     gherkin_texts: list[str],
     url: str,
     mode: str,
-    framework: str
+    framework: str,
+    dom_elements: Optional[list[dict]] = None,
 ) -> Optional[str]:
     """
     Generate a complete test suite for the given Gherkin features.
     Supports Anthropic, Gemini, OpenAI.
+
+    When `dom_elements` is provided (Mode B with a successful crawl) the LLM is
+    instructed to use those exact selectors instead of inventing them.
+    Each element should look like:
+        {"role": "login_button", "selector": "#login-button", "tag": "INPUT"}
     """
     api_key = os.getenv("LLM_API_KEY", "")
     if not api_key:
@@ -23,10 +29,27 @@ async def generate_test_suite(
 
         # Build prompt
         features_str = "\n\n".join(f"Feature {i+1}:\n{text}" for i, text in enumerate(gherkin_texts))
-        
+
         mode_instruction = ""
         if mode == "dom":
-            mode_instruction = f"The target URL is '{url}'. Since this is DOM-Aware mode, assume we have crawled the DOM. Use realistic standard CSS selectors (e.g., #user-name, #password) appropriate for a standard app if you can infer them, otherwise make your best logical guess for the elements."
+            if dom_elements:
+                rows = "\n".join(
+                    f"  - role={e['role']:<32s} selector={e['selector']:<40s} tag={e.get('tag','')}"
+                    + (f"  text={e['text']!r}" if e.get('text') else "")
+                    for e in dom_elements
+                )
+                mode_instruction = (
+                    f"The target URL is '{url}'. We crawled the live DOM and extracted these REAL elements. "
+                    f"You MUST use these exact selectors in the generated code (do NOT invent or guess any other selectors):\n"
+                    f"{rows}\n\n"
+                    f"If a Gherkin step refers to an element not in this list, leave a clear TODO comment "
+                    f"with the role you'd need (e.g. `# TODO: selector for 'add_to_cart_button' not crawled yet`)."
+                )
+            else:
+                mode_instruction = (
+                    f"The target URL is '{url}'. Since this is DOM-Aware mode but no crawled "
+                    f"selectors were provided, use realistic standard CSS selectors and add a TODO comment."
+                )
         else:
             mode_instruction = "This is Abstract Mode. The target UI is not available yet. Please use clear placeholder locators (e.g. <<USERNAME_INPUT_PLACEHOLDER>>) in the code."
 

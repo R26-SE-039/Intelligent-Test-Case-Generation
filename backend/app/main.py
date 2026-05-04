@@ -17,6 +17,7 @@ import logging
 
 from app.database import init_db
 from app.routes import router
+from app.dom_crawler import log_broker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
     """Run DB table creation on startup."""
     logger.info("Initialising database tables...")
     await init_db()
+    log_broker.bind_loop(asyncio.get_running_loop())
     logger.info("Database ready.")
     yield
     logger.info("Shutting down.")
@@ -75,6 +77,33 @@ async def execution_stream(websocket: WebSocket, run_id: str):
         logger.error(f"WebSocket error: {e}")
     finally:
         logger.info(f"WebSocket client disconnected for run_id: {run_id}")
+
+
+@app.websocket("/ws/dom/crawl/{run_id}")
+async def dom_crawl_stream(websocket: WebSocket, run_id: str):
+    """
+    Live crawler log stream (Phase 3). The frontend opens this BEFORE calling
+    POST /dom/crawl with the same run_id; messages are forwarded until the
+    crawler publishes the sentinel (None) signalling end-of-run.
+    """
+    await websocket.accept()
+    queue = log_broker.open(run_id)
+    logger.info(f"WS subscribed to crawl run: {run_id}")
+    try:
+        while True:
+            line = await queue.get()
+            if line is None:
+                await websocket.send_json({"type": "end"})
+                break
+            await websocket.send_json({"type": "log", "line": line})
+    except Exception as e:
+        logger.warning(f"WS crawl stream error for {run_id}: {e}")
+    finally:
+        log_broker.close(run_id)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

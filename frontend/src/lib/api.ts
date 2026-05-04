@@ -1,9 +1,14 @@
 /**
  * API client for NextGen QA Component 2 backend.
- * Base URL reads from NEXT_PUBLIC_API_URL env var (defaults to localhost:8002).
+ * Base URL reads from NEXT_PUBLIC_API_URL env var (defaults to localhost:8000,
+ * matching the Makefile's `BACKEND_PORT ?= 8000`).
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+// Per-request fetch timeout. Without this, a hung backend (restarting, wrong
+// port, blocked by firewall) freezes the UI on its loading spinner forever.
+const REQUEST_TIMEOUT_MS = 30_000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,10 +64,30 @@ export interface TestSuite {
 // ─── Core fetch helper ────────────────────────────────────────────────────────
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  const controller = new AbortController();
+  // Honour any signal the caller already passed in.
+  if (options?.signal) {
+    options.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error(
+        `API timeout after ${REQUEST_TIMEOUT_MS}ms: ${path}. Backend at ${BASE_URL} unreachable?`,
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const error = await res.text();
@@ -251,6 +276,26 @@ export interface DomCrawlResponse {
   elements: DomElement[];
   logs: string[];
   extracted_count: number;
+  auth_strategy_used: string;
+  auth_steps_replayed: number;
+  unmatched_background_steps: string[];
+}
+
+export type AuthStrategy = "background" | "none" | "manual" | "storage_state";
+
+export interface ManualAuthConfig {
+  login_url?: string;
+  username_selector?: string;
+  username_value?: string;
+  password_selector?: string;
+  password_value?: string;
+  submit_selector?: string;
+}
+
+export interface CrawlOptions {
+  authStrategy?: AuthStrategy;
+  manualAuth?: ManualAuthConfig;
+  storageState?: unknown;  // Playwright storageState JSON
 }
 
 /** Reachability check (HTTP, no browser) for the wizard's Validate button. */
@@ -261,12 +306,58 @@ export async function probeUrl(url: string): Promise<ProbeResponse> {
   });
 }
 
-/** Run the Playwright crawler against a URL and persist extracted elements. */
-export async function crawlDom(projectId: string, url: string): Promise<DomCrawlResponse> {
+/**
+ * Run the Playwright crawler against a URL and persist extracted elements.
+ * Default auth strategy is "background" — replays the project's Gherkin
+ * Background steps to log in. Pass `authStrategy: "none"` for public pages,
+ * "manual" with `manualAuth` for fixed-credential forms, or "storage_state"
+ * with a Playwright storageState JSON for SSO/2FA-protected sites.
+ *
+ * `runId` lets you open `openCrawlLogStream(runId)` in parallel for live logs.
+ */
+export async function crawlDom(
+  projectId: string,
+  url: string,
+  options: CrawlOptions & { runId?: string } = {},
+): Promise<DomCrawlResponse> {
   return request<DomCrawlResponse>("/api/v1/dom/crawl", {
     method: "POST",
-    body: JSON.stringify({ project_id: projectId, url }),
+    body: JSON.stringify({
+      project_id: projectId,
+      url,
+      auth_strategy: options.authStrategy ?? "background",
+      manual_auth: options.manualAuth,
+      storage_state: options.storageState,
+      run_id: options.runId,
+    }),
   });
+}
+
+/** Open a WebSocket that streams crawler log lines for a given run_id. */
+export function openCrawlLogStream(
+  runId: string,
+  onLog: (line: string) => void,
+  onEnd?: () => void,
+): WebSocket {
+  // Convert HTTP base URL to WS protocol (http -> ws, https -> wss).
+  const wsBase = BASE_URL.replace(/^http/, "ws");
+  const ws = new WebSocket(`${wsBase}/ws/dom/crawl/${encodeURIComponent(runId)}`);
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data);
+      if (data.type === "log" && typeof data.line === "string") onLog(data.line);
+      else if (data.type === "end") {
+        onEnd?.();
+        ws.close();
+      }
+    } catch {
+      // ignore malformed frames
+    }
+  };
+  ws.onerror = () => {
+    // Browser will also fire close after this; nothing actionable here.
+  };
+  return ws;
 }
 
 /** List persisted DOM elements for a project (optionally a single URL). */
@@ -303,4 +394,16 @@ export async function addDomElement(
 /** Delete one DOM element. */
 export async function deleteDomElement(elementId: string): Promise<void> {
   return request<void>(`/api/v1/dom/elements/${elementId}`, { method: "DELETE" });
+}
+
+/** Approve (or unapprove) every element in a project, optionally scoped to a URL. */
+export async function bulkApproveDomElements(
+  projectId: string,
+  approved: boolean,
+  url?: string,
+): Promise<DomElement[]> {
+  return request<DomElement[]>("/api/v1/dom/elements/bulk-approve", {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, url, approved }),
+  });
 }

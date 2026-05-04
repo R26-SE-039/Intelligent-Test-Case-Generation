@@ -21,6 +21,9 @@ from typing import Optional
 import httpx
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
+from app.dom_crawler.auth import AuthPlan
+from app.dom_crawler.log_broker import broker as _broker
+
 logger = logging.getLogger(__name__)
 
 
@@ -237,10 +240,52 @@ async def probe_url(url: str, timeout_seconds: float = 8.0) -> ProbeResult:
         return ProbeResult(ok=False, status=0, error=f"{type(e).__name__}: {e}")
 
 
+def _replay_auth(page, plan: AuthPlan, log) -> None:
+    """
+    Execute each Action in the plan against the live page. Failures on
+    individual steps are logged and skipped so the crawl can still extract
+    whatever it can — a partial DOM is better than a total failure.
+    """
+    if plan.is_empty:
+        return
+    log(f"Replaying {len(plan.actions)} auth action(s)")
+    for action in plan.actions:
+        try:
+            if action.kind == "goto":
+                page.goto(action.target, wait_until="domcontentloaded", timeout=15000)
+            elif action.kind == "fill":
+                loc = page.locator(action.target).first
+                loc.wait_for(state="visible", timeout=5000)
+                loc.fill(action.value or "")
+            elif action.kind == "click":
+                loc = page.locator(action.target).first
+                loc.wait_for(state="visible", timeout=5000)
+                loc.click()
+                # After a click that likely submits, wait for navigation/idle
+                try:
+                    page.wait_for_load_state("networkidle", timeout=5000)
+                except PWTimeout:
+                    pass
+            elif action.kind == "wait":
+                try:
+                    page.wait_for_load_state(action.target or "domcontentloaded", timeout=5000)
+                except PWTimeout:
+                    pass
+            log(f"  ok: {action.description}")
+        except Exception as e:
+            log(f"  skip ({type(e).__name__}): {action.description}")
+    if plan.unmatched_steps:
+        for s in plan.unmatched_steps:
+            log(f"  warn: Background step not translated -> {s}")
+
+
 def _crawl_sync(
     url: str,
     nav_timeout_ms: int,
     settle_ms: int,
+    auth_plan: Optional[AuthPlan],
+    storage_state: Optional[dict],
+    run_id: Optional[str],
 ) -> tuple[list[ExtractedElement], list[str]]:
     """
     Synchronous crawl. Run from a worker thread via asyncio.to_thread() so it
@@ -254,20 +299,34 @@ def _crawl_sync(
     def log(msg: str) -> None:
         logs.append(msg)
         logger.info("crawler: %s", msg)
+        if run_id:
+            _broker.publish_threadsafe(run_id, msg)
 
-    log(f"Launching Chromium headless -> {url}")
+    auth_summary = (
+        f" (with {len(auth_plan.actions)} auth actions)"
+        if auth_plan and not auth_plan.is_empty
+        else (" (with storageState)" if storage_state else "")
+    )
+    log(f"Launching Chromium headless -> {url}{auth_summary}")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
-            context = browser.new_context(
-                user_agent="NextGenQA-Crawler/1.0 (+research)",
-                viewport={"width": 1280, "height": 800},
-            )
+            ctx_kwargs = {
+                "user_agent": "NextGenQA-Crawler/1.0 (+research)",
+                "viewport": {"width": 1280, "height": 800},
+            }
+            if storage_state:
+                ctx_kwargs["storage_state"] = storage_state
+            context = browser.new_context(**ctx_kwargs)
             page = context.new_page()
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=nav_timeout_ms)
             except PWTimeout:
                 log(f"Navigation timed out after {nav_timeout_ms}ms - extracting whatever loaded")
+
+            # Replay Gherkin-Background auth (Phase 4).
+            if auth_plan and not auth_plan.is_empty:
+                _replay_auth(page, auth_plan, log)
 
             try:
                 page.wait_for_load_state("networkidle", timeout=5000)
@@ -276,7 +335,8 @@ def _crawl_sync(
             time.sleep(settle_ms / 1000)
 
             title = page.title() or "(no title)"
-            log(f"DOM ready - title='{title}'")
+            current_url = page.url
+            log(f"DOM ready - title='{title}' url='{current_url}'")
 
             raw = page.evaluate(_EXTRACT_SCRIPT)
             log(f"Found {len(raw)} candidate elements before role inference")
@@ -313,12 +373,22 @@ async def crawl_url(
     *,
     nav_timeout_ms: int = 20000,
     settle_ms: int = 800,
+    auth_plan: Optional[AuthPlan] = None,
+    storage_state: Optional[dict] = None,
+    run_id: Optional[str] = None,
 ) -> tuple[list[ExtractedElement], list[str]]:
     """
     Visit `url` headlessly and extract interactable elements with inferred roles.
-    Phase 2: no authentication. Phase 4 will replay Gherkin Background here.
 
-    Runs the synchronous Playwright crawl in a worker thread to avoid the
-    asyncio-subprocess incompatibility on Windows under uvicorn.
+    auth_plan: Optional AuthPlan from app.dom_crawler.auth.build_auth_plan()
+               replayed before extraction (Phase 4).
+    storage_state: Optional Playwright storage state JSON for SSO/2FA sites
+                   (Phase 6).
+    run_id: Optional. When provided, log lines are also pushed to the
+            log_broker so a WS subscriber receives them live (Phase 3).
+
+    Runs the synchronous Playwright crawl in a worker thread.
     """
-    return await asyncio.to_thread(_crawl_sync, url, nav_timeout_ms, settle_ms)
+    return await asyncio.to_thread(
+        _crawl_sync, url, nav_timeout_ms, settle_ms, auth_plan, storage_state, run_id
+    )
