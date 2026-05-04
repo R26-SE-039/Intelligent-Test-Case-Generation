@@ -8,7 +8,10 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Per-request fetch timeout. Without this, a hung backend (restarting, wrong
 // port, blocked by firewall) freezes the UI on its loading spinner forever.
+// LLM-heavy endpoints (code generation) override via the `timeoutMs` arg.
 const REQUEST_TIMEOUT_MS = 30_000;
+const LLM_REQUEST_TIMEOUT_MS = 180_000;
+const CRAWL_REQUEST_TIMEOUT_MS = 90_000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,13 +66,16 @@ export interface TestSuite {
 
 // ─── Core fetch helper ────────────────────────────────────────────────────────
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit & { timeoutMs?: number },
+): Promise<T> {
+  const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
-  // Honour any signal the caller already passed in.
   if (options?.signal) {
     options.signal.addEventListener("abort", () => controller.abort(), { once: true });
   }
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
   try {
@@ -81,7 +87,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
       throw new Error(
-        `API timeout after ${REQUEST_TIMEOUT_MS}ms: ${path}. Backend at ${BASE_URL} unreachable?`,
+        `API timeout after ${timeoutMs}ms: ${path}. Backend at ${BASE_URL} unreachable, slow, or stuck on an LLM call?`,
       );
     }
     throw e;
@@ -94,9 +100,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(`API ${res.status}: ${error}`);
   }
 
-  // 204 No Content
   if (res.status === 204) return undefined as T;
-
   return res.json() as Promise<T>;
 }
 
@@ -226,6 +230,7 @@ export async function generateTestCode(
       mode,
       frameworks,
     }),
+    timeoutMs: LLM_REQUEST_TIMEOUT_MS,
   });
 }
 
@@ -330,6 +335,7 @@ export async function crawlDom(
       storage_state: options.storageState,
       run_id: options.runId,
     }),
+    timeoutMs: CRAWL_REQUEST_TIMEOUT_MS,
   });
 }
 

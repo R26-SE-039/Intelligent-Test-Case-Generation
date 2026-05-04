@@ -714,21 +714,38 @@ async def generate_code(
     dom_hash = _dom_elements_fingerprint(elements)
     combined_hash = _combined_inputs_hash(scenarios_hash, dom_hash)
 
-    saved: list[TestSuite] = []
-    for framework in body.frameworks:
-        try:
-            generated_code = await generate_test_suite(
-                gherkin_texts=gherkin_texts,
-                url=body.url,
-                mode=body.mode,
-                framework=framework,
-                dom_elements=dom_payload or None,
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to generate code for {framework}: {str(e)}")
+    # Fan out one LLM call per framework. Wall-clock = max(call_i) instead
+    # of sum(call_i); for "Generate All" that's roughly 3x faster.
+    import asyncio as _asyncio
+    try:
+        generated_codes = await _asyncio.gather(
+            *(
+                generate_test_suite(
+                    gherkin_texts=gherkin_texts,
+                    url=body.url,
+                    mode=body.mode,
+                    framework=fw,
+                    dom_elements=dom_payload or None,
+                )
+                for fw in body.frameworks
+            ),
+            return_exceptions=True,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Code generation failed: {e}")
 
+    saved: list[TestSuite] = []
+    for framework, generated_code in zip(body.frameworks, generated_codes):
+        if isinstance(generated_code, Exception):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate code for {framework}: {generated_code}",
+            )
         if not generated_code:
-            raise HTTPException(status_code=500, detail=f"Failed to generate code for {framework}: LLM returned None")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate code for {framework}: LLM returned None",
+            )
 
         language, filename = _framework_meta(framework)
 
