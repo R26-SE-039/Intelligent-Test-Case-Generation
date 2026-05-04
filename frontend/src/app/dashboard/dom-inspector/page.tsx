@@ -39,14 +39,62 @@ import { useProject } from "@/lib/project-context";
 
 type EditPatch = Partial<Pick<DomElement, "selector" | "role" | "tag" | "text">>;
 
+// Per-project memory of the last URL/mode/framework the user worked on.
+// Used when the page is opened via the sidebar (no query params present)
+// so the inspector resumes where you left off instead of showing "(no URL)".
+const LAST_INSPECTED_KEY = (projectId: string) => `nextgenqa.dom-inspector.last:${projectId}`;
+
+type LastInspected = { url: string; mode: string; framework: string };
+
 function DomInspectorContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const modeParam = searchParams.get("mode") || "dom";
-  const fwParam = searchParams.get("framework") || "playwright";
-  const urlParam = searchParams.get("url") || "";
+  const queryUrl = searchParams.get("url") || "";
+  const queryMode = searchParams.get("mode") || "dom";
+  const queryFramework = searchParams.get("framework") || "playwright";
 
   const { activeProject } = useProject();
+
+  // If we arrived without ?url=… (e.g. via the sidebar), restore the saved
+  // selection for this project. If saved exists, we replace the URL so the
+  // rest of the page sees consistent params; otherwise we surface a clear
+  // empty-state CTA back to mode-setup.
+  useEffect(() => {
+    if (!activeProject) return;
+    if (typeof window === "undefined") return;
+
+    if (queryUrl) {
+      // Came from mode-setup with full params — remember them for next time.
+      const payload: LastInspected = {
+        url: queryUrl,
+        mode: queryMode,
+        framework: queryFramework,
+      };
+      window.localStorage.setItem(LAST_INSPECTED_KEY(activeProject.id), JSON.stringify(payload));
+      return;
+    }
+
+    // No params — try to restore.
+    const raw = window.localStorage.getItem(LAST_INSPECTED_KEY(activeProject.id));
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw) as LastInspected;
+      if (saved.url) {
+        const qs = new URLSearchParams({
+          mode: saved.mode || "dom",
+          framework: saved.framework || "playwright",
+          url: saved.url,
+        });
+        router.replace(`/dashboard/dom-inspector?${qs.toString()}`);
+      }
+    } catch {
+      // ignore corrupt entries
+    }
+  }, [activeProject, queryUrl, queryMode, queryFramework, router]);
+
+  const modeParam = queryMode;
+  const fwParam = queryFramework;
+  const urlParam = queryUrl;
 
   const [elements, setElements] = useState<DomElement[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
@@ -586,20 +634,39 @@ function DomInspectorContent() {
             ) : elementCount === 0 && !newRow ? (
               <div className="h-full flex flex-col items-center justify-center text-center px-6 py-16">
                 <Search className="w-8 h-8 text-purple-500 mb-3" />
-                <p className="text-sm font-medium text-slate-800 mb-1">No elements extracted yet</p>
-                <p className="text-xs text-slate-500 max-w-sm mb-4">
-                  Click <strong>Crawl now</strong> to launch headless Chromium against{" "}
-                  <span className="font-mono text-slate-700">{urlParam || "this URL"}</span> and
-                  extract real selectors. Phase 2 — auth-protected pages need Phase 4.
-                </p>
-                <button
-                  onClick={runCrawl}
-                  disabled={isCrawling || !activeProject || !urlParam}
-                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-md transition-all disabled:opacity-50"
-                >
-                  {isCrawling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                  Crawl now
-                </button>
+                {urlParam ? (
+                  <>
+                    <p className="text-sm font-medium text-slate-800 mb-1">No elements extracted yet</p>
+                    <p className="text-xs text-slate-500 max-w-sm mb-4">
+                      Click <strong>Crawl now</strong> to launch headless Chromium against{" "}
+                      <span className="font-mono text-slate-700">{urlParam}</span> and
+                      extract real selectors.
+                    </p>
+                    <button
+                      onClick={runCrawl}
+                      disabled={isCrawling || !activeProject}
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-md transition-all disabled:opacity-50"
+                    >
+                      {isCrawling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                      Crawl now
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-medium text-slate-800 mb-1">No staging URL selected</p>
+                    <p className="text-xs text-slate-500 max-w-sm mb-4">
+                      The DOM Inspector needs a target URL. Pick one in <strong>Mode &amp; URL Setup</strong>;
+                      it&apos;ll be remembered so this page restores it next time you visit from the sidebar.
+                    </p>
+                    <Link
+                      href="/dashboard/mode-setup"
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-md transition-all"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      Go to Mode &amp; URL Setup
+                    </Link>
+                  </>
+                )}
               </div>
             ) : (
               <table className="w-full text-xs">
