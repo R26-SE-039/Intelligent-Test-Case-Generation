@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense, useCallback } from "react";
+import { useState, useEffect, Suspense, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import DashboardLayoutWrapper from "@/components/dashboard-layout-wrapper";
 import dynamic from "next/dynamic";
@@ -14,20 +14,58 @@ import {
   PlayCircle,
   Database,
   Loader2,
-  Layers
+  Layers,
+  Sparkles,
+  AlertTriangle,
+  Save,
 } from "lucide-react";
 import Link from "next/link";
-import { generateTestCode } from "@/lib/api";
+import {
+  generateTestCode,
+  getTestSuites,
+  updateTestSuiteCode,
+  type TestSuite,
+} from "@/lib/api";
 import { useProject } from "@/lib/project-context";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
 type Framework = "selenium" | "playwright" | "cypress";
 
-const initialCodeMap: Record<Framework, { language: string; filename: string; code: string; generated: boolean }> = {
-  selenium: { language: "python", filename: "test_suite_selenium.py", code: "# Click 'Generate' to generate Selenium code...", generated: false },
-  playwright: { language: "python", filename: "test_suite_playwright.py", code: "# Click 'Generate' to generate Playwright code...", generated: false },
-  cypress: { language: "javascript", filename: "test_suite_cypress.cy.js", code: "// Click 'Generate' to generate Cypress code...", generated: false },
+type FrameworkState = {
+  language: string;
+  filename: string;
+  code: string;
+  suiteId: string | null;
+  isStale: boolean;
+  updatedAt: string | null;
+  scenarioCount: number;
+  hasSavedSuite: boolean;
+  dirty: boolean;
+};
+
+const frameworkDefaults: Record<Framework, { language: string; filename: string }> = {
+  selenium: { language: "python", filename: "test_suite_selenium.py" },
+  playwright: { language: "python", filename: "test_suite_playwright.py" },
+  cypress: { language: "javascript", filename: "test_suite_cypress.cy.js" },
+};
+
+const emptyState = (fw: Framework): FrameworkState => ({
+  language: frameworkDefaults[fw].language,
+  filename: frameworkDefaults[fw].filename,
+  code: "",
+  suiteId: null,
+  isStale: false,
+  updatedAt: null,
+  scenarioCount: 0,
+  hasSavedSuite: false,
+  dirty: false,
+});
+
+const initialCodeMap: Record<Framework, FrameworkState> = {
+  selenium: emptyState("selenium"),
+  playwright: emptyState("playwright"),
+  cypress: emptyState("cypress"),
 };
 
 const frameworkTabs: { id: Framework; label: string; badge: string; color: string }[] = [
@@ -45,6 +83,20 @@ const domElements = [
   { selector: ".shopping_cart_badge", tag: "SPAN", step: "verify cart count" },
 ];
 
+function suiteToState(suite: TestSuite): FrameworkState {
+  return {
+    language: suite.language,
+    filename: suite.filename,
+    code: suite.code,
+    suiteId: suite.id,
+    isStale: suite.is_stale,
+    updatedAt: suite.updated_at ?? null,
+    scenarioCount: suite.source_scenario_count,
+    hasSavedSuite: true,
+    dirty: false,
+  };
+}
+
 function CodeReviewContent() {
   const searchParams = useSearchParams();
   const modeParam = searchParams.get("mode") || "dom";
@@ -56,65 +108,106 @@ function CodeReviewContent() {
   const [activeFramework, setActiveFramework] = useState<Framework>(fwParam);
   const [codeMap, setCodeMap] = useState(initialCodeMap);
   const [copied, setCopied] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [generatingFramework, setGeneratingFramework] = useState<Framework | "all" | null>(null);
+  const [savingSuiteId, setSavingSuiteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const generateCode = useCallback(async (frameworksToGenerate: Framework[]) => {
-    if (!activeProject) return;
-    setIsGenerating(true);
-    setError(null);
-    
-    // Set loading text
-    setCodeMap(prev => {
-      const next = { ...prev };
-      frameworksToGenerate.forEach(fw => {
-        next[fw] = { ...next[fw], code: `/* Generating ${fw} code using LLM... Please wait... */` };
-      });
-      return next;
-    });
-
-    try {
-      const results = await generateTestCode(activeProject.id, urlParam, modeParam, frameworksToGenerate);
-      
-      setCodeMap(prev => {
-        const next = { ...prev };
-        results.forEach(res => {
-          const fw = res.framework as Framework;
-          next[fw] = {
-            language: res.language,
-            filename: res.filename,
-            code: res.code,
-            generated: true
-          };
-        });
-        return next;
-      });
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to generate code");
-      
-      // Reset text on error
-      setCodeMap(prev => {
-        const next = { ...prev };
-        frameworksToGenerate.forEach(fw => {
-          next[fw] = { ...next[fw], code: `/* Generation failed for ${fw}. Please try again. */` };
-        });
-        return next;
-      });
-    } finally {
-      setIsGenerating(false);
-    }
-  }, [activeProject, urlParam, modeParam]);
-
-  // Initial generation for active tab
+  // Load persisted suites on mount / project change. No LLM call.
   useEffect(() => {
-    if (activeProject && !codeMap[activeFramework].generated && !isGenerating) {
-      generateCode([activeFramework]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFramework, activeProject]);
+    if (!activeProject) return;
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+
+    getTestSuites(activeProject.id)
+      .then((suites) => {
+        if (cancelled) return;
+        setCodeMap((prev) => {
+          const next: Record<Framework, FrameworkState> = {
+            selenium: emptyState("selenium"),
+            playwright: emptyState("playwright"),
+            cypress: emptyState("cypress"),
+          };
+          for (const s of suites) {
+            const fw = s.framework as Framework;
+            if (fw in next) next[fw] = suiteToState(s);
+          }
+          return next;
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || "Failed to load saved test suites");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject]);
+
+  const generateCode = useCallback(
+    async (frameworksToGenerate: Framework[]) => {
+      if (!activeProject) return;
+      setError(null);
+      setGeneratingFramework(frameworksToGenerate.length > 1 ? "all" : frameworksToGenerate[0]);
+      try {
+        const results = await generateTestCode(
+          activeProject.id,
+          urlParam,
+          modeParam,
+          frameworksToGenerate,
+        );
+        setCodeMap((prev) => {
+          const next = { ...prev };
+          for (const s of results) {
+            const fw = s.framework as Framework;
+            if (fw in next) next[fw] = suiteToState(s);
+          }
+          return next;
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to generate code";
+        setError(message);
+      } finally {
+        setGeneratingFramework(null);
+      }
+    },
+    [activeProject, urlParam, modeParam],
+  );
+
+  // Debounced auto-save of QA edits to the persisted suite.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const state = codeMap[activeFramework];
+    if (!state.dirty || !state.suiteId) return;
+
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    const suiteId = state.suiteId;
+    const code = state.code;
+    saveTimer.current = setTimeout(async () => {
+      setSavingSuiteId(suiteId);
+      try {
+        const updated = await updateTestSuiteCode(suiteId, code);
+        setCodeMap((prev) => ({ ...prev, [activeFramework]: suiteToState(updated) }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to save edits";
+        setError(message);
+      } finally {
+        setSavingSuiteId(null);
+      }
+    }, 1200);
+
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [codeMap, activeFramework]);
 
   const active = codeMap[activeFramework];
+  const isGeneratingActive =
+    generatingFramework === "all" || generatingFramework === activeFramework;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(active.code);
@@ -133,9 +226,15 @@ function CodeReviewContent() {
   const handleCodeChange = (value: string | undefined) => {
     setCodeMap((prev) => ({
       ...prev,
-      [activeFramework]: { ...prev[activeFramework], code: value ?? prev[activeFramework].code },
+      [activeFramework]: {
+        ...prev[activeFramework],
+        code: value ?? prev[activeFramework].code,
+        dirty: true,
+      },
     }));
   };
+
+  const generateLabel = active.hasSavedSuite ? "Regenerate" : "Generate";
 
   return (
     <DashboardLayoutWrapper>
@@ -180,41 +279,80 @@ function CodeReviewContent() {
         </div>
       )}
 
+      {active.isStale && active.hasSavedSuite && (
+        <div className="mx-6 mt-4 p-3 bg-amber-50 text-amber-800 text-sm rounded border border-amber-200 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>
+            Gherkin scenarios have changed since this suite was generated. Click <strong>Regenerate</strong> to refresh it.
+          </span>
+        </div>
+      )}
+
       <div className="flex gap-5 h-[calc(100vh-145px)] p-6">
         {/* Main Editor Area */}
         <div className="flex-1 flex flex-col min-w-0 rounded-xl border border-slate-200 overflow-hidden bg-white shadow-sm">
           {/* Framework Tabs */}
           <div className="flex items-center bg-slate-50 border-b border-slate-200 px-2">
-            {frameworkTabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveFramework(tab.id)}
-                className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-all ${
-                  activeFramework === tab.id
-                    ? "border-purple-500 text-slate-900 bg-white"
-                    : "border-transparent text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                <Code2 className="w-4 h-4" />
-                {tab.label}
-                <span className={`text-[10px] font-semibold ${tab.color}`}>{tab.badge}</span>
-              </button>
-            ))}
+            {frameworkTabs.map((tab) => {
+              const tabState = codeMap[tab.id];
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveFramework(tab.id)}
+                  className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-all ${
+                    activeFramework === tab.id
+                      ? "border-purple-500 text-slate-900 bg-white"
+                      : "border-transparent text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  <Code2 className="w-4 h-4" />
+                  {tab.label}
+                  <span className={`text-[10px] font-semibold ${tab.color}`}>{tab.badge}</span>
+                  {tabState.hasSavedSuite && tabState.isStale && (
+                    <span title="Scenarios changed since last generation">
+                      <AlertTriangle className="w-3 h-3 text-amber-500" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
             <div className="ml-auto flex items-center gap-2 pr-2">
+              {savingSuiteId === active.suiteId && active.suiteId && (
+                <span className="flex items-center gap-1 text-[11px] text-slate-500">
+                  <Save className="w-3 h-3" /> Saving…
+                </span>
+              )}
+              <button
+                onClick={() => generateCode([activeFramework])}
+                disabled={generatingFramework !== null || !activeProject}
+                className="flex items-center gap-1.5 text-xs text-white bg-purple-600 hover:bg-purple-700 px-3 py-1.5 rounded-md transition-all disabled:opacity-50"
+              >
+                {isGeneratingActive ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
+                {generateLabel}
+              </button>
               <button
                 onClick={() => generateCode(["selenium", "playwright", "cypress"])}
-                disabled={isGenerating}
+                disabled={generatingFramework !== null || !activeProject}
                 className="flex items-center gap-1.5 text-xs text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 px-3 py-1.5 rounded-md transition-all disabled:opacity-50"
               >
-                {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Layers className="w-3.5 h-3.5" />}
-                Generate All Frameworks
+                {generatingFramework === "all" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Layers className="w-3.5 h-3.5" />
+                )}
+                Generate All
               </button>
-              
+
               <div className="w-px h-5 bg-slate-200 mx-1"></div>
 
               <button
                 onClick={handleCopy}
-                className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 px-2.5 py-1.5 rounded-md hover:bg-white transition-all"
+                disabled={!active.hasSavedSuite}
+                className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 px-2.5 py-1.5 rounded-md hover:bg-white transition-all disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 {copied ? (
                   <><Check className="w-3.5 h-3.5 text-emerald-600" /> Copied</>
@@ -224,7 +362,8 @@ function CodeReviewContent() {
               </button>
               <button
                 onClick={handleDownload}
-                className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 px-2.5 py-1.5 rounded-md hover:bg-white transition-all"
+                disabled={!active.hasSavedSuite}
+                className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 px-2.5 py-1.5 rounded-md hover:bg-white transition-all disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 <Download className="w-3.5 h-3.5" /> Download
               </button>
@@ -237,34 +376,66 @@ function CodeReviewContent() {
             <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">
               Mode {modeParam === "dom" ? "B · DOM-Aware" : "A · Abstract"}
             </span>
+            {active.hasSavedSuite && (
+              <span className="text-[10px] text-slate-500 ml-auto">
+                {active.scenarioCount} scenario{active.scenarioCount === 1 ? "" : "s"}
+                {active.updatedAt && ` · saved ${new Date(active.updatedAt).toLocaleString()}`}
+              </span>
+            )}
           </div>
 
-          {/* Monaco */}
+          {/* Editor / empty state */}
           <div className="flex-1 relative">
-            {isGenerating && (
-              <div className="absolute inset-0 z-10 bg-white/50 backdrop-blur-[1px] flex flex-col items-center justify-center">
-                 <Loader2 className="w-8 h-8 text-purple-600 animate-spin mb-3" />
-                 <p className="text-sm font-medium text-slate-700">Generating automation code via LLM...</p>
-                 <p className="text-xs text-slate-500">This might take a few seconds.</p>
+            {isGeneratingActive && (
+              <div className="absolute inset-0 z-10 bg-white/60 backdrop-blur-[1px] flex flex-col items-center justify-center">
+                <Loader2 className="w-8 h-8 text-purple-600 animate-spin mb-3" />
+                <p className="text-sm font-medium text-slate-700">Generating automation code via LLM…</p>
+                <p className="text-xs text-slate-500">This might take a few seconds.</p>
               </div>
             )}
-            <MonacoEditor
-              height="100%"
-              language={active.language}
-              theme="vs"
-              value={active.code}
-              onChange={handleCodeChange}
-              options={{
-                fontSize: 12.5,
-                lineHeight: 22,
-                minimap: { enabled: true },
-                wordWrap: "off",
-                scrollBeyondLastLine: false,
-                padding: { top: 12 },
-                fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-                fontLigatures: true,
-              }}
-            />
+
+            {isLoading ? (
+              <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-500">
+                <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading saved suites…
+              </div>
+            ) : !active.hasSavedSuite ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6">
+                <Sparkles className="w-8 h-8 text-purple-500 mb-3" />
+                <p className="text-sm font-medium text-slate-800 mb-1">
+                  No {frameworkTabs.find((t) => t.id === activeFramework)?.label} suite yet
+                </p>
+                <p className="text-xs text-slate-500 max-w-sm mb-4">
+                  Generation calls the LLM. We only do it when you click the button — and the result is
+                  saved so you don&apos;t pay for it again on the next visit.
+                </p>
+                <button
+                  onClick={() => generateCode([activeFramework])}
+                  disabled={generatingFramework !== null || !activeProject}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-md transition-all disabled:opacity-50"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  Generate {frameworkTabs.find((t) => t.id === activeFramework)?.label} suite
+                </button>
+              </div>
+            ) : (
+              <MonacoEditor
+                height="100%"
+                language={active.language}
+                theme="vs"
+                value={active.code}
+                onChange={handleCodeChange}
+                options={{
+                  fontSize: 12.5,
+                  lineHeight: 22,
+                  minimap: { enabled: true },
+                  wordWrap: "off",
+                  scrollBeyondLastLine: false,
+                  padding: { top: 12 },
+                  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                  fontLigatures: true,
+                }}
+              />
+            )}
           </div>
         </div>
 

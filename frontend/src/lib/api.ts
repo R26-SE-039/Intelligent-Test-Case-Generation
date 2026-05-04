@@ -40,11 +40,20 @@ export interface GherkinResult {
   approved: boolean;
 }
 
-export interface CodeGenResult {
+export interface TestSuite {
+  id: string;
+  project_id: string;
   framework: string;
   language: string;
   filename: string;
   code: string;
+  mode: string;
+  url: string;
+  llm_model?: string | null;
+  source_scenarios_hash: string;
+  source_scenario_count: number;
+  is_stale: boolean;
+  updated_at?: string | null;
 }
 
 // ─── Core fetch helper ────────────────────────────────────────────────────────
@@ -173,14 +182,18 @@ export async function regenerateGherkin(
 
 // ─── Code Generation API ──────────────────────────────────────────────────────
 
-/** Generate test code for all Gherkin stories in a project. */
+/**
+ * Generate (or regenerate) test code for the given frameworks.
+ * Persisted server-side: subsequent loads should use `getTestSuites` instead
+ * of calling this, so we don't burn LLM tokens on every navigation.
+ */
 export async function generateTestCode(
   projectId: string,
   url: string,
   mode: string,
   frameworks: string[]
-): Promise<CodeGenResult[]> {
-  return request<CodeGenResult[]>("/api/v1/code/generate", {
+): Promise<TestSuite[]> {
+  return request<TestSuite[]>("/api/v1/code/generate", {
     method: "POST",
     body: JSON.stringify({
       project_id: projectId,
@@ -188,5 +201,21 @@ export async function generateTestCode(
       mode,
       frameworks,
     }),
+  });
+}
+
+/** Load persisted test suites for a project (no LLM calls). */
+export async function getTestSuites(projectId: string): Promise<TestSuite[]> {
+  return request<TestSuite[]>(`/api/v1/code/suites?project_id=${encodeURIComponent(projectId)}`);
+}
+
+/** Save QA edits to a suite's code without regenerating. */
+export async function updateTestSuiteCode(
+  suiteId: string,
+  code: string,
+): Promise<TestSuite> {
+  return request<TestSuite>(`/api/v1/code/suites/${suiteId}`, {
+    method: "PUT",
+    body: JSON.stringify({ code }),
   });
 }

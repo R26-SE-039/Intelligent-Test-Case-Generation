@@ -5,10 +5,14 @@ Tables:
   - projects          : top-level project container
   - user_stories      : stories received from C1 (or entered manually), scoped to a project
   - gherkin_scenarios : AI-generated Gherkin for each story
+  - test_suites       : persisted LLM-generated test code, one row per (project, framework)
 """
 
-from sqlalchemy import Column, String, Boolean, Text, DateTime, ForeignKey, Enum as SAEnum
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    Column, String, Boolean, Text, DateTime, Integer,
+    ForeignKey, Enum as SAEnum, UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 import uuid
 import enum
@@ -90,3 +94,38 @@ class GherkinScenario(Base):
     approved = Column(Boolean, default=False)           # QA approved this scenario
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class TestSuite(Base):
+    """
+    Persisted test code generated from approved Gherkin scenarios.
+    One row per (project_id, framework) — regeneration upserts.
+
+    source_scenarios_hash fingerprints the Gherkin inputs that produced this
+    suite, so the UI can detect when scenarios have drifted and prompt the
+    user to regenerate (instead of silently burning LLM tokens on every page
+    load).
+    """
+    __tablename__ = "test_suites"
+    __table_args__ = (
+        UniqueConstraint("project_id", "framework", name="uq_test_suites_project_framework"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    framework = Column(String(40), nullable=False)      # selenium | playwright | cypress
+    language = Column(String(40), nullable=False)       # python | javascript
+    filename = Column(String(255), nullable=False)
+    code = Column(Text, nullable=False)
+    mode = Column(String(40), nullable=False)           # abstract | dom
+    url = Column(Text, nullable=False)
+    llm_model = Column(String(100), nullable=True)
+    source_scenarios_hash = Column(String(64), nullable=False)
+    source_scenario_ids = Column(JSONB, nullable=False, default=list)
+    source_scenario_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

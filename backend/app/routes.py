@@ -25,11 +25,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from pydantic import BaseModel
 from typing import Optional
+import hashlib
 import json
 import uuid
 
 from app.database import get_db
-from app.models import Project, UserStory, GherkinScenario, Priority, Status
+from app.models import Project, UserStory, GherkinScenario, TestSuite, Priority, Status
 from app.gherkin.generator import generate_gherkin
 from app.code_gen.generator import generate_test_suite
 
@@ -556,60 +557,204 @@ class CodeGenRequest(BaseModel):
     mode: str
     frameworks: list[str]  # e.g., ["playwright"] or ["selenium", "playwright", "cypress"]
 
-class CodeGenResult(BaseModel):
+
+class TestSuiteOut(BaseModel):
+    id: str
+    project_id: str
     framework: str
     language: str
     filename: str
     code: str
+    mode: str
+    url: str
+    llm_model: Optional[str] = None
+    source_scenarios_hash: str
+    source_scenario_count: int
+    is_stale: bool                      # current scenarios hash differs from stored
+    updated_at: Optional[str] = None
 
-@router.post("/code/generate", response_model=list[CodeGenResult])
+    class Config:
+        from_attributes = True
+
+
+def _framework_meta(framework: str) -> tuple[str, str]:
+    """Return (language, filename) for a framework name."""
+    if framework == "cypress":
+        return "javascript", "test_suite_cypress.cy.js"
+    return "python", f"test_suite_{framework}.py"
+
+
+def _scenarios_fingerprint(scenarios: list[GherkinScenario]) -> tuple[str, list[str], int]:
+    """
+    Deterministic fingerprint of the Gherkin inputs.
+    Returns (sha256_hex, sorted_scenario_ids, count).
+    Sorting by id makes the hash insensitive to row order.
+    """
+    pairs = sorted(
+        ((str(s.id), s.gherkin_text or "") for s in scenarios),
+        key=lambda p: p[0],
+    )
+    h = hashlib.sha256()
+    for sid, text in pairs:
+        h.update(sid.encode())
+        h.update(b"\x00")
+        h.update(text.encode())
+        h.update(b"\x00")
+    return h.hexdigest(), [sid for sid, _ in pairs], len(pairs)
+
+
+def _suite_out(s: TestSuite, current_hash: str) -> TestSuiteOut:
+    return TestSuiteOut(
+        id=str(s.id),
+        project_id=str(s.project_id),
+        framework=s.framework,
+        language=s.language,
+        filename=s.filename,
+        code=s.code,
+        mode=s.mode,
+        url=s.url,
+        llm_model=s.llm_model,
+        source_scenarios_hash=s.source_scenarios_hash,
+        source_scenario_count=s.source_scenario_count,
+        is_stale=s.source_scenarios_hash != current_hash,
+        updated_at=s.updated_at.isoformat() if s.updated_at else None,
+    )
+
+
+@router.post("/code/generate", response_model=list[TestSuiteOut])
 async def generate_code(
     body: CodeGenRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Generate executable test code for the given project's Gherkin scenarios.
-    Returns code for each requested framework.
+    Generate executable test code from the project's Gherkin scenarios and
+    upsert one TestSuite row per framework. Idempotent per (project, framework).
     """
-    # Fetch all approved or existing Gherkin scenarios for the project
     result = await db.execute(
         select(GherkinScenario).where(GherkinScenario.project_id == body.project_id)
     )
     scenarios = result.scalars().all()
-    
+
     if not scenarios:
         raise HTTPException(status_code=404, detail="No Gherkin scenarios found for this project.")
 
     gherkin_texts = [s.gherkin_text for s in scenarios if s.gherkin_text]
-    
     if not gherkin_texts:
         raise HTTPException(status_code=400, detail="Gherkin scenarios are empty.")
 
-    results = []
-    
+    current_hash, scenario_ids, scenario_count = _scenarios_fingerprint(scenarios)
+
+    saved: list[TestSuite] = []
     for framework in body.frameworks:
         try:
             generated_code = await generate_test_suite(
                 gherkin_texts=gherkin_texts,
                 url=body.url,
                 mode=body.mode,
-                framework=framework
+                framework=framework,
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate code for {framework}: {str(e)}")
-        
+
         if not generated_code:
             raise HTTPException(status_code=500, detail=f"Failed to generate code for {framework}: LLM returned None")
-            
-        language = "javascript" if framework == "cypress" else "python"
-        ext = "cy.js" if framework == "cypress" else "py"
-        filename = f"test_suite_{framework}.{ext}"
-        
-        results.append(CodeGenResult(
-            framework=framework,
-            language=language,
-            filename=filename,
-            code=generated_code
-        ))
-        
-    return results
+
+        language, filename = _framework_meta(framework)
+
+        existing_q = await db.execute(
+            select(TestSuite).where(
+                TestSuite.project_id == body.project_id,
+                TestSuite.framework == framework,
+            )
+        )
+        existing = existing_q.scalar_one_or_none()
+
+        if existing:
+            existing.code = generated_code
+            existing.language = language
+            existing.filename = filename
+            existing.mode = body.mode
+            existing.url = body.url
+            existing.source_scenarios_hash = current_hash
+            existing.source_scenario_ids = scenario_ids
+            existing.source_scenario_count = scenario_count
+            db.add(existing)
+            saved.append(existing)
+        else:
+            suite = TestSuite(
+                id=uuid.uuid4(),
+                project_id=body.project_id,
+                framework=framework,
+                language=language,
+                filename=filename,
+                code=generated_code,
+                mode=body.mode,
+                url=body.url,
+                source_scenarios_hash=current_hash,
+                source_scenario_ids=scenario_ids,
+                source_scenario_count=scenario_count,
+            )
+            db.add(suite)
+            saved.append(suite)
+
+    await db.commit()
+    for s in saved:
+        await db.refresh(s)
+
+    return [_suite_out(s, current_hash) for s in saved]
+
+
+@router.get("/code/suites", response_model=list[TestSuiteOut])
+async def list_test_suites(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Load persisted test suites for a project — no LLM calls.
+    Each suite carries an `is_stale` flag set when the project's current
+    Gherkin scenarios no longer match the inputs that produced the suite.
+    """
+    suites_q = await db.execute(
+        select(TestSuite)
+        .where(TestSuite.project_id == project_id)
+        .order_by(TestSuite.framework.asc())
+    )
+    suites = suites_q.scalars().all()
+
+    if not suites:
+        return []
+
+    scenarios_q = await db.execute(
+        select(GherkinScenario).where(GherkinScenario.project_id == project_id)
+    )
+    current_hash, _, _ = _scenarios_fingerprint(scenarios_q.scalars().all())
+
+    return [_suite_out(s, current_hash) for s in suites]
+
+
+@router.put("/code/suites/{suite_id}", response_model=TestSuiteOut)
+async def update_test_suite_code(
+    suite_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist QA edits to a suite's code without regenerating."""
+    new_code = body.get("code")
+    if not isinstance(new_code, str):
+        raise HTTPException(status_code=400, detail="`code` (string) is required")
+
+    result = await db.execute(select(TestSuite).where(TestSuite.id == suite_id))
+    suite = result.scalar_one_or_none()
+    if not suite:
+        raise HTTPException(status_code=404, detail="Test suite not found")
+
+    suite.code = new_code
+    db.add(suite)
+    await db.commit()
+    await db.refresh(suite)
+
+    scenarios_q = await db.execute(
+        select(GherkinScenario).where(GherkinScenario.project_id == suite.project_id)
+    )
+    current_hash, _, _ = _scenarios_fingerprint(scenarios_q.scalars().all())
+    return _suite_out(suite, current_hash)
