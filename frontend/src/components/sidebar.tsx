@@ -12,6 +12,7 @@ import {
   ChevronRight,
   LogOut,
   FolderOpen,
+  Search,
 } from "lucide-react";
 import { useSidebar } from "@/lib/sidebar-context";
 import { useProject } from "@/lib/project-context";
@@ -43,16 +44,22 @@ const navItems: NavItem[] = [
     step: "S3",
   },
   {
+    label: "DOM Inspector",
+    icon: <Search className="w-5 h-5" />,
+    href: "/dashboard/dom-inspector",
+    step: "S4",
+  },
+  {
     label: "Code Review",
     icon: <Code2 className="w-5 h-5" />,
     href: "/dashboard/code-review",
-    step: "S4",
+    step: "S5",
   },
   {
     label: "Execution & Report",
     icon: <PlayCircle className="w-5 h-5" />,
     href: "/dashboard/execution",
-    step: "S5",
+    step: "S6",
   },
 ];
 
