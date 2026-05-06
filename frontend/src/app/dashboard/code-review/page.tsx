@@ -24,7 +24,9 @@ import {
   generateTestCode,
   getTestSuites,
   updateTestSuiteCode,
+  getRiskPredictions,
   type TestSuite,
+  type RiskPrediction,
 } from "@/lib/api";
 import { useProject } from "@/lib/project-context";
 
@@ -112,6 +114,8 @@ function CodeReviewContent() {
   const [generatingFramework, setGeneratingFramework] = useState<Framework | "all" | null>(null);
   const [savingSuiteId, setSavingSuiteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [riskPredictions, setRiskPredictions] = useState<RiskPrediction[]>([]);
+  const [riskSource, setRiskSource] = useState<"model" | "heuristic" | null>(null);
 
   // Load persisted suites on mount / project change. No LLM call.
   useEffect(() => {
@@ -143,6 +147,27 @@ function CodeReviewContent() {
         if (!cancelled) setIsLoading(false);
       });
 
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject]);
+
+  // Pull ML risk predictions for the active project. Failure is silent —
+  // the panel just hides when nothing came back so the rest of the page works.
+  useEffect(() => {
+    if (!activeProject) return;
+    let cancelled = false;
+    getRiskPredictions(activeProject.id)
+      .then((res) => {
+        if (cancelled) return;
+        setRiskPredictions(res.predictions);
+        setRiskSource(res.source);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRiskPredictions([]);
+        setRiskSource(null);
+      });
     return () => {
       cancelled = true;
     };
@@ -467,27 +492,55 @@ function CodeReviewContent() {
             </div>
           </div>
 
-          {/* Risk badges */}
+          {/* Risk badges — driven by /api/v1/projects/{id}/risk */}
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold text-slate-600 mb-3 flex items-center gap-2">
-              ML Risk Prediction
-            </p>
-            {[
-              { label: "Login Flow", risk: "HIGH", color: "text-red-700 bg-red-50 border-red-200" },
-              { label: "Cart Operations", risk: "MEDIUM", color: "text-amber-700 bg-amber-50 border-amber-200" },
-              { label: "Checkout", risk: "HIGH", color: "text-red-700 bg-red-50 border-red-200" },
-              { label: "Search", risk: "LOW", color: "text-emerald-700 bg-emerald-50 border-emerald-200" },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0"
-              >
-                <span className="text-xs text-slate-700">{item.label}</span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${item.color}`}>
-                  {item.risk}
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-slate-600 flex items-center gap-2">
+                ML Risk Prediction
+              </p>
+              {riskSource && (
+                <span
+                  className={`text-[9px] font-medium px-1.5 py-0.5 rounded border ${
+                    riskSource === "model"
+                      ? "text-purple-700 bg-purple-50 border-purple-200"
+                      : "text-slate-600 bg-slate-50 border-slate-200"
+                  }`}
+                  title={
+                    riskSource === "model"
+                      ? "Predictions come from the trained classifier."
+                      : "Model not trained yet — using heuristic fallback."
+                  }
+                >
+                  {riskSource === "model" ? "MODEL" : "HEURISTIC"}
                 </span>
-              </div>
-            ))}
+              )}
+            </div>
+            {riskPredictions.length === 0 ? (
+              <p className="text-[11px] text-slate-400 italic py-2">
+                No predictions yet — select a project.
+              </p>
+            ) : (
+              riskPredictions.map((item) => {
+                const color =
+                  item.risk === "HIGH"
+                    ? "text-red-700 bg-red-50 border-red-200"
+                    : item.risk === "MEDIUM"
+                      ? "text-amber-700 bg-amber-50 border-amber-200"
+                      : "text-emerald-700 bg-emerald-50 border-emerald-200";
+                return (
+                  <div
+                    key={item.flow}
+                    className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0"
+                    title={`Confidence ${(item.confidence * 100).toFixed(0)}%`}
+                  >
+                    <span className="text-xs text-slate-700">{item.label}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${color}`}>
+                      {item.risk}
+                    </span>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       </div>

@@ -1,0 +1,74 @@
+[
+  {
+    "feature": "past_pass_rate",
+    "importance": 0.5809831892791896
+  },
+  {
+    "feature": "mean_duration_s",
+    "importance": 0.062074236228377266
+  },
+  {
+    "feature": "qa_edit_ratio",
+    "importance": 0.04823801775742036
+  },
+  {
+    "feature": "avg_dom_confidence",
+    "importance": 0.047118198871712855
+  },
+  {
+    "feature": "code_lines",
+    "importance": 0.04244316510039015
+  },
+  {
+    "feature": "duration_stddev_s",
+    "importance": 0.04103076239940558
+  },
+  {
+    "feature": "n_inputs",
+    "importance": 0.03966964599495316
+  },
+  {
+    "feature": "n_steps",
+    "importance": 0.03771241768625093
+  },
+  {
+    "feature": "n_waits",
+    "importance": 0.029112913300235698
+  },
+  {
+    "feature": "past_runs",
+    "importance": 0.019977152414863232
+  },
+  {
+    "feature": "n_assertions",
+    "importance": 0.01554252523699659
+  },
+  {
+    "feature": "has_payment",
+    "importance": 0.011466814915396284
+  },
+  {
+    "feature": "n_buttons",
+    "importance": 0.009710259812558903
+  },
+  {
+    "feature": "has_form_input",
+    "importance": 0.0050394299050599166
+  },
+  {
+    "feature": "has_auth",
+    "importance": 0.0028359343673388174
+  },
+  {
+    "feature": "priority_high",
+    "importance": 0.0025466898425032594
+  },
+  {
+    "feature": "priority_medium",
+    "importance": 0.0024890267208018207
+  },
+  {
+    "feature": "priority_low",
+    "importance": 0.002009620166545628
+  }
+]

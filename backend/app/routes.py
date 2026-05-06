@@ -34,6 +34,7 @@ from app.models import Project, UserStory, GherkinScenario, TestSuite, DomElemen
 from app.gherkin.generator import generate_gherkin
 from app.code_gen.generator import generate_test_suite
 from app.dom_crawler import crawl_url, probe_url, build_auth_plan, AuthPlan, log_broker
+from app.ml.predict import predict_for_project
 
 router = APIRouter(prefix="/api/v1", tags=["pipeline"])
 
@@ -1263,3 +1264,41 @@ async def bulk_approve_dom_elements(
     for r in rows:
         await db.refresh(r)
     return [_dom_out(r) for r in rows]
+
+
+# ─── ML Risk Prediction endpoint ──────────────────────────────────────────────
+
+class RiskPrediction(BaseModel):
+    flow: str
+    label: str
+    risk: str
+    confidence: float
+    probabilities: dict[str, float]
+    features: dict[str, float]
+
+
+class RiskResponse(BaseModel):
+    project_id: str
+    source: str                        # "model" | "heuristic"
+    model_classes: list[str]
+    feature_columns: list[str]
+    predictions: list[RiskPrediction]
+
+
+@router.get("/projects/{project_id}/risk", response_model=RiskResponse)
+async def get_risk_predictions(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Score the four flow buckets (Login, Cart, Checkout, Search) for this
+    project. Uses the trained RandomForest if `app/ml/data/model.pkl` exists;
+    otherwise falls back to a deterministic heuristic so the UI keeps working
+    before the model has been trained for the first time.
+    """
+    proj_q = await db.execute(select(Project).where(Project.id == project_id))
+    if not proj_q.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    result = await predict_for_project(db, project_id)
+    return RiskResponse(project_id=project_id, **result)

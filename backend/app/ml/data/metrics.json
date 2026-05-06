@@ -1,0 +1,11 @@
+{
+  "n_train": 1914,
+  "n_test": 400,
+  "accuracy": 0.9425,
+  "macro_f1": 0.9433553986869847,
+  "baseline_decision_tree": {
+    "accuracy": 0.9425,
+    "macro_f1": 0.9433888078244866
+  },
+  "used_smote": true
+}

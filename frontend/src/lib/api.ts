@@ -413,3 +413,30 @@ export async function bulkApproveDomElements(
     body: JSON.stringify({ project_id: projectId, url, approved }),
   });
 }
+
+// ─── ML Risk Prediction API ──────────────────────────────────────────────────
+
+export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
+
+export interface RiskPrediction {
+  flow: string;
+  label: string;
+  risk: RiskLevel;
+  confidence: number;
+  probabilities: Record<RiskLevel, number>;
+  features: Record<string, number>;
+}
+
+export interface RiskResponse {
+  project_id: string;
+  source: "model" | "heuristic";
+  model_classes: string[];
+  feature_columns: string[];
+  predictions: RiskPrediction[];
+}
+
+/** Score the four flow buckets for a project. Returns model-driven predictions
+ * when the trained classifier is available, otherwise a heuristic fallback. */
+export async function getRiskPredictions(projectId: string): Promise<RiskResponse> {
+  return request<RiskResponse>(`/api/v1/projects/${projectId}/risk`);
+}

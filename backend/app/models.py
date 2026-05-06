@@ -7,6 +7,7 @@ Tables:
   - gherkin_scenarios : AI-generated Gherkin for each story
   - test_suites       : persisted LLM-generated test code, one row per (project, framework)
   - dom_elements      : selectors extracted from the live staging DOM, editable by QA
+  - test_runs         : execution log of each test scenario, used as labels for ML risk prediction
 """
 
 from sqlalchemy import (
@@ -164,3 +165,36 @@ class DomElement(Base):
     approved = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TestRun(Base):
+    """
+    One row per executed test scenario. Accumulating these rows over time is
+    what turns the risk prediction model from synthetic-only into a real
+    supervised classifier (failure rate per flow becomes the label).
+
+    `flow_name` groups runs into the buckets the UI surfaces ("login_flow",
+    "cart_ops", "checkout", "search"). It is derived from the scenario name
+    on insertion so the model can aggregate without a join.
+    """
+    __tablename__ = "test_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    suite_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("test_suites.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    scenario_name = Column(String(255), nullable=False)
+    flow_name = Column(String(64), nullable=False, index=True)
+    framework = Column(String(40), nullable=False)
+    status = Column(String(20), nullable=False)         # passed | failed | error
+    duration_ms = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    executed_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
