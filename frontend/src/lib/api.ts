@@ -440,3 +440,115 @@ export interface RiskResponse {
 export async function getRiskPredictions(projectId: string): Promise<RiskResponse> {
   return request<RiskResponse>(`/api/v1/projects/${projectId}/risk`);
 }
+
+// ─── Agent Explorer API ──────────────────────────────────────────────────────
+
+export interface AgentSomElement {
+  id: number;
+  tag: string;
+  selector: string;
+  text: string;
+  role: string;
+  bbox: { x: number; y: number; w: number; h: number };
+  attrs: Record<string, string>;
+}
+
+export type AgentRole = "planner" | "actor" | "observer" | "critic";
+
+export type AgentEvent =
+  | { type: "status"; ts: number; message: string }
+  | {
+      type: "screenshot";
+      ts: number;
+      step: number;
+      b64: string;
+      elements: AgentSomElement[];
+      url: string;
+      title: string;
+      state_hash: string;
+      novel_state: boolean;
+      total_novel_states: number;
+    }
+  | { type: "thought"; ts: number; role: AgentRole; text: string; step: number }
+  | {
+      type: "action";
+      ts: number;
+      step: number;
+      action_type: string;
+      element_id?: number;
+      value?: string;
+      url?: string;
+      reason?: string;
+      success: boolean;
+      message: string;
+    }
+  | { type: "lesson"; ts: number; step: number; text: string }
+  | {
+      type: "coverage";
+      ts: number;
+      step: number;
+      goals_done: string[];
+      goals_pending: string[];
+    }
+  | {
+      type: "scenario_discovered";
+      ts: number;
+      step: number;
+      title: string;
+      steps: string[];
+    }
+  | {
+      type: "done";
+      ts: number;
+      reason: string;
+      total_steps: number;
+      total_novel_states: number;
+      scenarios: { title: string; steps: string[] }[];
+    }
+  | { type: "error"; ts: number; message: string }
+  | { type: "end" };
+
+export interface StartExplorationResponse {
+  run_id: string;
+  message: string;
+}
+
+/** Kick off an agent exploration run. Open `openAgentEventStream(run_id)`
+ *  immediately after this resolves to receive live events. */
+export async function startExploration(params: {
+  intent: string;
+  url: string;
+  projectId?: string;
+  maxSteps?: number;
+  headless?: boolean;
+}): Promise<StartExplorationResponse> {
+  return request<StartExplorationResponse>("/api/v1/agent/explore", {
+    method: "POST",
+    body: JSON.stringify({
+      intent: params.intent,
+      url: params.url,
+      project_id: params.projectId,
+      max_steps: params.maxSteps ?? 12,
+      headless: params.headless ?? false,
+    }),
+  });
+}
+
+/** Open a WebSocket that streams typed AgentEvent messages for a run. */
+export function openAgentEventStream(
+  runId: string,
+  onEvent: (event: AgentEvent) => void,
+): WebSocket {
+  const wsBase = BASE_URL.replace(/^http/, "ws");
+  const ws = new WebSocket(`${wsBase}/ws/agent/${encodeURIComponent(runId)}`);
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data) as AgentEvent;
+      onEvent(data);
+      if (data.type === "end") ws.close();
+    } catch {
+      // ignore malformed frames
+    }
+  };
+  return ws;
+}

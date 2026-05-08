@@ -13,6 +13,7 @@ import {
   LogOut,
   FolderOpen,
   Search,
+  Sparkles,
 } from "lucide-react";
 import { useSidebar } from "@/lib/sidebar-context";
 import { useProject } from "@/lib/project-context";
@@ -60,6 +61,12 @@ const navItems: NavItem[] = [
     icon: <PlayCircle className="w-5 h-5" />,
     href: "/dashboard/execution",
     step: "S6",
+  },
+  {
+    label: "Agent Explorer",
+    icon: <Sparkles className="w-5 h-5" />,
+    href: "/dashboard/agent-explorer",
+    step: "AI",
   },
 ];
 
