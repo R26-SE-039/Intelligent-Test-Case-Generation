@@ -1,116 +1,215 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import DashboardLayoutWrapper from "@/components/dashboard-layout-wrapper";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import {
-  PlayCircle,
-  ChevronLeft,
+  AlertTriangle,
   CheckCircle,
-  XCircle,
+  ChevronLeft,
   Clock,
   Download,
-  Terminal,
+  ExternalLink,
+  FileText,
+  GitBranch,
   Image as ImageIcon,
-  Zap,
+  Loader2,
+  PlayCircle,
   RotateCcw,
-  AlertTriangle,
+  Terminal,
+  XCircle,
+  Zap,
 } from "lucide-react";
-import Link from "next/link";
+import {
+  executeSuite,
+  getRun,
+  getTestSuites,
+  openExecutionStream,
+  runLogUrl,
+  runPdfUrl,
+  type ExecutionEvent,
+  type RunDetail,
+  type RunScreenshot,
+  type TestSuite,
+} from "@/lib/api";
+import { useProject } from "@/lib/project-context";
 
-type RunStatus = "idle" | "running" | "done" | "failed";
+type Status = "idle" | "queued" | "running" | "passed" | "failed" | "error";
 
-interface LogEntry {
-  step: string;
-  status: "running" | "passed" | "failed" | "info";
-  timestamp: string;
-  duration?: string;
+interface LiveLog {
+  ts: number;
+  kind: "step" | "log" | "info";
+  step?: string;
+  line?: string;
+  status?: string;
 }
 
-const simulatedLogs: LogEntry[] = [
-  { step: "Connecting to GitHub Actions runner...", status: "info", timestamp: "00:00" },
-  { step: "Checking out generated tests", status: "passed", timestamp: "00:01", duration: "1.2s" },
-  { step: "Setting up Python 3.10", status: "passed", timestamp: "00:03", duration: "2.1s" },
-  { step: "Installing Playwright + pytest", status: "passed", timestamp: "00:07", duration: "4.0s" },
-  { step: "Installing Chromium browser", status: "passed", timestamp: "00:12", duration: "5.3s" },
-  { step: "Running test_successful_login", status: "passed", timestamp: "00:15", duration: "3.1s" },
-  { step: "Running test_failed_login_invalid_credentials", status: "passed", timestamp: "00:18", duration: "2.7s" },
-  { step: "Running test_add_item_to_cart", status: "passed", timestamp: "00:21", duration: "3.3s" },
-  { step: "Running test_remove_item_from_cart", status: "passed", timestamp: "00:24", duration: "2.9s" },
-  { step: "Running test_checkout_success", status: "passed", timestamp: "00:27", duration: "4.2s" },
-  { step: "Running test_checkout_missing_info", status: "failed", timestamp: "00:31", duration: "1.8s" },
-  { step: "Capturing screenshots and video", status: "passed", timestamp: "00:33", duration: "0.9s" },
-  { step: "Generating Allure HTML report", status: "passed", timestamp: "00:34", duration: "1.4s" },
-  { step: "Posting results via webhook", status: "passed", timestamp: "00:36", duration: "0.3s" },
-];
-
-const chartData = [
-  { name: "Passed", value: 5, color: "#10b981" },
-  { name: "Failed", value: 1, color: "#ef4444" },
-];
-
-const screenshots = [
-  { label: "Login Success", scenario: "test_successful_login", status: "passed" },
-  { label: "Login Failure", scenario: "test_failed_login_invalid_credentials", status: "passed" },
-  { label: "Add to Cart", scenario: "test_add_item_to_cart", status: "passed" },
-  { label: "Remove from Cart", scenario: "test_remove_item_from_cart", status: "passed" },
-  { label: "Checkout Success", scenario: "test_checkout_success", status: "passed" },
-  { label: "Checkout Error", scenario: "test_checkout_missing_info", status: "failed" },
-];
-
-const statusIcon: Record<LogEntry["status"], React.ReactNode> = {
-  info: <Terminal className="w-3.5 h-3.5 text-slate-500" />,
-  running: <Clock className="w-3.5 h-3.5 text-blue-600 animate-pulse" />,
-  passed: <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />,
-  failed: <XCircle className="w-3.5 h-3.5 text-red-600" />,
+const statusIcon = (status: string | undefined) => {
+  if (status === "passed" || status === "success") return <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />;
+  if (status === "failed" || status === "failure") return <XCircle className="w-3.5 h-3.5 text-red-600" />;
+  if (status === "running") return <Clock className="w-3.5 h-3.5 text-blue-600 animate-pulse" />;
+  return <Terminal className="w-3.5 h-3.5 text-slate-500" />;
 };
 
-export default function ExecutionPage() {
-  const [runStatus, setRunStatus] = useState<RunStatus>("idle");
-  const [visibleLogs, setVisibleLogs] = useState<LogEntry[]>([]);
-  const [currentStep, setCurrentStep] = useState(0);
+function ExecutionContent() {
+  const searchParams = useSearchParams();
+  const { activeProject } = useProject();
+  const suiteIdParam = searchParams.get("suite") || "";
+  const frameworkParam = searchParams.get("framework") || "";
+
+  const [selectedSuite, setSelectedSuite] = useState<TestSuite | null>(null);
+  const [suiteLoading, setSuiteLoading] = useState(false);
+  const [suiteError, setSuiteError] = useState<string | null>(null);
+
+  const [runId, setRunId] = useState<string | null>(null);
+  const [runMode, setRunMode] = useState<string | null>(null);
+  const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
+  const [logs, setLogs] = useState<LiveLog[]>([]);
+  const [status, setStatus] = useState<Status>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [pdfReady, setPdfReady] = useState(false);
+  const [ghRunUrl, setGhRunUrl] = useState<string | null>(null);
+
   const logRef = useRef<HTMLDivElement>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  const startRun = () => {
-    setRunStatus("running");
-    setVisibleLogs([]);
-    setCurrentStep(0);
+  // Load the suite metadata up front so we can show the user what's about to run.
+  useEffect(() => {
+    if (!activeProject || !suiteIdParam) return;
+    let cancelled = false;
+    setSuiteLoading(true);
+    setSuiteError(null);
+    getTestSuites(activeProject.id)
+      .then((suites) => {
+        if (cancelled) return;
+        const match = suites.find((s) => s.id === suiteIdParam);
+        if (match) setSelectedSuite(match);
+        else if (frameworkParam) {
+          // Suite id stale — fall back to the active suite for that framework.
+          const fallback = suites.find((s) => s.framework === frameworkParam);
+          if (fallback) setSelectedSuite(fallback);
+        }
+      })
+      .catch((e) => setSuiteError(e instanceof Error ? e.message : "Failed to load suite"))
+      .finally(() => {
+        if (!cancelled) setSuiteLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject, suiteIdParam, frameworkParam]);
 
-    let idx = 0;
-    timerRef.current = setInterval(() => {
-      if (idx >= simulatedLogs.length) {
-        clearInterval(timerRef.current!);
-        const hasFailed = simulatedLogs.some((l) => l.status === "failed");
-        setRunStatus(hasFailed ? "failed" : "done");
-        return;
-      }
-      setVisibleLogs((prev) => [...prev, simulatedLogs[idx]]);
-      setCurrentStep(idx + 1);
-      idx++;
-    }, 600);
-  };
+  // Auto-scroll the live log.
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [logs]);
+
+  // Cleanup WS on unmount.
+  useEffect(() => () => { wsRef.current?.close(); }, []);
+
+  const fetchRunDetail = useCallback(async (id: string) => {
+    try {
+      const detail = await getRun(id);
+      setRunDetail(detail);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load run details");
+    }
+  }, []);
+
+  const handleEvent = useCallback((evt: ExecutionEvent) => {
+    if (evt.type === "step") {
+      setLogs((prev) => [...prev, {
+        ts: Date.now(), kind: "step", step: evt.step, status: evt.status,
+      }]);
+    } else if (evt.type === "log") {
+      setLogs((prev) => [...prev, { ts: Date.now(), kind: "log", line: evt.line }]);
+    } else if (evt.type === "github") {
+      setGhRunUrl(evt.run_url);
+      setLogs((prev) => [...prev, {
+        ts: Date.now(), kind: "info",
+        step: `GitHub Actions run started — branch ${evt.branch}`,
+      }]);
+    } else if (evt.type === "pdf_ready") {
+      setPdfReady(true);
+      setLogs((prev) => [...prev, {
+        ts: Date.now(), kind: "info", step: "PDF report ready",
+      }]);
+    } else if (evt.type === "done") {
+      const final = evt.status === "passed" ? "passed" : evt.status === "failed" ? "failed" : "error";
+      setStatus(final);
+      if (runId) void fetchRunDetail(runId);
+    } else if (evt.type === "error") {
+      setStatus("error");
+      setError(evt.message);
+    }
+  }, [runId, fetchRunDetail]);
+
+  const startRun = useCallback(async () => {
+    if (!selectedSuite || !activeProject) return;
+    setLogs([]);
+    setRunDetail(null);
+    setPdfReady(false);
+    setGhRunUrl(null);
+    setError(null);
+    setStatus("queued");
+
+    try {
+      const resp = await executeSuite({
+        suiteId: selectedSuite.id,
+        projectId: activeProject.id,
+      });
+      setRunId(resp.run_id);
+      setRunMode(resp.mode);
+      setStatus("running");
+
+      // Open the live stream.
+      wsRef.current?.close();
+      wsRef.current = openExecutionStream(resp.run_id, handleEvent);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start run");
+      setStatus("error");
+    }
+  }, [selectedSuite, activeProject, handleEvent]);
 
   const resetRun = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setRunStatus("idle");
-    setVisibleLogs([]);
-    setCurrentStep(0);
+    wsRef.current?.close();
+    setRunId(null);
+    setRunDetail(null);
+    setLogs([]);
+    setStatus("idle");
+    setError(null);
+    setPdfReady(false);
+    setGhRunUrl(null);
   };
 
-  useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [visibleLogs]);
+  const isDone = status === "passed" || status === "failed" || status === "error";
+  const isBusy = status === "queued" || status === "running";
 
-  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+  const summary = useMemo(() => {
+    if (!runDetail) return null;
+    const total = runDetail.total_count;
+    const passed = runDetail.passed_count;
+    const failed = runDetail.failed_count;
+    return {
+      total,
+      passed,
+      failed,
+      successRate: total ? Math.round((passed / total) * 100) : 0,
+      durationSec: runDetail.duration_ms ? (runDetail.duration_ms / 1000).toFixed(1) : "—",
+    };
+  }, [runDetail]);
 
-  const isDone = runStatus === "done" || runStatus === "failed";
-  const passed = chartData[0].value;
-  const failed = chartData[1].value;
-  const total = passed + failed;
-  const successRate = Math.round((passed / total) * 100);
+  const chartData = useMemo(
+    () => summary
+      ? [
+          { name: "Passed", value: summary.passed, color: "#10b981" },
+          { name: "Failed", value: summary.failed, color: "#ef4444" },
+        ].filter((d) => d.value > 0)
+      : [],
+    [summary],
+  );
 
   return (
     <DashboardLayoutWrapper>
@@ -126,7 +225,7 @@ export default function ExecutionPage() {
             </div>
             <h1 className="text-2xl font-bold text-slate-900">Execution &amp; Report</h1>
             <p className="text-slate-600 text-sm mt-0.5">
-              Run tests via GitHub Actions · Live log streaming · Download PDF report
+              Run the selected suite · Live log streamed via WebSocket · Raw log saved to DB · PDF report on completion
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -147,15 +246,17 @@ export default function ExecutionPage() {
               </button>
             )}
             <button
-              onClick={runStatus === "idle" || isDone ? startRun : undefined}
-              disabled={runStatus === "running"}
+              onClick={startRun}
+              disabled={!selectedSuite || isBusy}
               className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold text-sm transition-all ${
-                runStatus === "running"
+                isBusy
                   ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                  : !selectedSuite
+                  ? "bg-slate-200 text-slate-400 cursor-not-allowed"
                   : "bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-lg shadow-purple-600/30"
               }`}
             >
-              {runStatus === "running" ? (
+              {isBusy ? (
                 <><Clock className="w-4 h-4 animate-spin" /> Running…</>
               ) : (
                 <><Zap className="w-4 h-4" /> Run Tests</>
@@ -164,6 +265,43 @@ export default function ExecutionPage() {
           </div>
         </div>
       </div>
+
+      {/* Suite info bar */}
+      <div className="mx-6 mt-4 flex items-center gap-3 text-xs">
+        {suiteLoading ? (
+          <span className="text-slate-500"><Loader2 className="w-3 h-3 inline animate-spin mr-1" />Loading suite…</span>
+        ) : suiteError ? (
+          <span className="text-red-600">{suiteError}</span>
+        ) : !selectedSuite ? (
+          <span className="text-amber-700">
+            No suite selected. Go to{" "}
+            <Link href="/dashboard/code-review" className="underline">Code Review</Link>{" "}
+            and pick a framework first.
+          </span>
+        ) : (
+          <>
+            <span className="px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-semibold">
+              {selectedSuite.framework} v{selectedSuite.version}
+            </span>
+            <span className="font-mono text-slate-600">{selectedSuite.filename}</span>
+            <span className="text-slate-400">·</span>
+            <span className="text-slate-500">{selectedSuite.url}</span>
+            {runMode && (
+              <span className="ml-auto px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                Runner: {runMode === "github" ? (
+                  <span className="inline-flex items-center gap-1"><GitBranch className="w-3 h-3" /> GitHub Actions</span>
+                ) : "Local Playwright"}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      {error && (
+        <div className="mx-6 mt-3 p-3 bg-red-50 text-red-600 text-sm rounded border border-red-200">
+          {error}
+        </div>
+      )}
 
       <div className="p-6 grid grid-cols-3 gap-5">
         {/* Left: Log + Screenshots */}
@@ -174,87 +312,79 @@ export default function ExecutionPage() {
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-purple-600" />
                 <p className="text-sm font-semibold text-slate-800">Live Execution Log</p>
-                {runStatus === "running" && (
+                {status === "running" && (
                   <span className="flex items-center gap-1.5 text-xs text-blue-600">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                    Streaming via WebSocket...
+                    Streaming via WebSocket
                   </span>
+                )}
+                {ghRunUrl && (
+                  <a
+                    href={ghRunUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ml-2 inline-flex items-center gap-1 text-xs text-purple-700 hover:text-purple-900 underline"
+                  >
+                    <GitBranch className="w-3 h-3" /> Open on GitHub
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
                 )}
               </div>
               <span className="text-xs text-slate-500">
-                {currentStep}/{simulatedLogs.length} steps
+                {logs.length} event{logs.length === 1 ? "" : "s"}
               </span>
             </div>
             <div
               ref={logRef}
-              className="h-64 overflow-y-auto p-4 font-mono text-xs space-y-1.5 bg-slate-50/40"
+              className="h-72 overflow-y-auto p-4 font-mono text-xs space-y-1 bg-slate-50/40"
               style={{ scrollbarWidth: "none" }}
             >
-              {runStatus === "idle" && (
-                <p className="text-slate-400 italic">Press Run Tests to start execution...</p>
+              {status === "idle" && (
+                <p className="text-slate-400 italic">Press Run Tests to start execution…</p>
               )}
-              {visibleLogs.map((log, i) => (
+              {logs.map((log, i) => (
                 <div key={i} className="flex items-start gap-2.5 group">
-                  <span className="mt-0.5 shrink-0">{statusIcon[log.status]}</span>
+                  <span className="mt-0.5 shrink-0">{statusIcon(log.status)}</span>
                   <span
-                    className={`flex-1 ${
+                    className={`flex-1 break-all ${
                       log.status === "failed"
                         ? "text-red-600"
                         : log.status === "passed"
                         ? "text-slate-700"
-                        : "text-slate-500"
+                        : log.kind === "log"
+                        ? "text-slate-500"
+                        : "text-slate-700"
                     }`}
                   >
-                    {log.step}
+                    {log.step || log.line}
                   </span>
-                  {log.duration && (
-                    <span className="text-slate-400 shrink-0">{log.duration}</span>
-                  )}
-                  <span className="text-slate-400 shrink-0">{log.timestamp}</span>
                 </div>
               ))}
             </div>
           </div>
 
           {/* Screenshots */}
-          {isDone && (
-            <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
-                <div className="flex items-center gap-2">
-                  <ImageIcon className="w-4 h-4 text-purple-600" />
-                  <p className="text-sm font-semibold text-slate-800">Test Screenshots</p>
-                </div>
+          {isDone && runDetail && runDetail.screenshots.length > 0 && (
+            <ScreenshotGrid screenshots={runDetail.screenshots} />
+          )}
+
+          {/* Failed test AI explanation */}
+          {isDone && runDetail && runDetail.failed_count > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                <p className="text-xs font-semibold text-amber-800">AI Failure Summary</p>
               </div>
-              <div className="p-4 grid grid-cols-3 gap-3">
-                {screenshots.map((s) => (
-                  <div
-                    key={s.label}
-                    className={`rounded-lg border overflow-hidden ${
-                      s.status === "failed" ? "border-red-300" : "border-slate-200"
-                    }`}
-                  >
-                    <div
-                      className={`h-24 flex items-center justify-center text-xs font-mono ${
-                        s.status === "failed" ? "bg-red-50" : "bg-slate-50"
-                      }`}
-                    >
-                      {s.status === "passed" ? (
-                        <span className="text-emerald-600/70">[ screenshot ]</span>
-                      ) : (
-                        <span className="text-red-600/70">[ assertion error ]</span>
-                      )}
-                    </div>
-                    <div className="px-2.5 py-2 bg-white flex items-center justify-between">
-                      <p className="text-[11px] text-slate-600 truncate">{s.label}</p>
-                      {s.status === "passed" ? (
-                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      ) : (
-                        <XCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <p className="text-xs text-slate-700 leading-relaxed">
+                {runDetail.failed_count} scenario
+                {runDetail.failed_count === 1 ? "" : "s"} failed. Open the raw log for the full
+                stack trace; C3 Self-Healing will analyse the broken selectors and propose fixes.
+              </p>
+              {runDetail.scenarios.filter((s) => s.status === "failed").slice(0, 3).map((s) => (
+                <p key={s.scenario_name} className="text-[11px] text-amber-900 mt-1 font-mono">
+                  • {s.scenario_name}
+                </p>
+              ))}
             </div>
           )}
         </div>
@@ -268,12 +398,13 @@ export default function ExecutionPage() {
             </p>
             <div className="space-y-3">
               {[
-                { label: "Total Tests", value: isDone ? String(total) : "—", color: "text-slate-900" },
-                { label: "Passed", value: isDone ? String(passed) : "—", color: "text-emerald-700" },
-                { label: "Failed", value: isDone ? String(failed) : "—", color: "text-red-700" },
-                { label: "Success Rate", value: isDone ? `${successRate}%` : "—", color: "text-purple-700" },
-                { label: "Duration", value: isDone ? "36.4s" : "—", color: "text-slate-700" },
-                { label: "Framework", value: "Playwright", color: "text-emerald-700" },
+                { label: "Status",       value: runDetail ? runDetail.status.toUpperCase() : status.toUpperCase(), color: statusColor(runDetail?.status ?? status) },
+                { label: "Total Tests",  value: summary ? String(summary.total) : "—",   color: "text-slate-900" },
+                { label: "Passed",       value: summary ? String(summary.passed) : "—",  color: "text-emerald-700" },
+                { label: "Failed",       value: summary ? String(summary.failed) : "—",  color: "text-red-700" },
+                { label: "Success Rate", value: summary ? `${summary.successRate}%` : "—", color: "text-purple-700" },
+                { label: "Duration",     value: summary ? `${summary.durationSec}s` : "—", color: "text-slate-700" },
+                { label: "Framework",    value: selectedSuite?.framework ?? "—",   color: "text-emerald-700" },
               ].map((s) => (
                 <div key={s.label} className="flex items-center justify-between">
                   <span className="text-xs text-slate-500">{s.label}</span>
@@ -283,8 +414,8 @@ export default function ExecutionPage() {
             </div>
           </div>
 
-          {/* Donut Chart */}
-          {isDone && (
+          {/* Donut chart */}
+          {summary && chartData.length > 0 && (
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">
                 Pass / Fail Chart
@@ -322,38 +453,43 @@ export default function ExecutionPage() {
             </div>
           )}
 
-          {/* Failed test AI explanation */}
-          {isDone && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                <p className="text-xs font-semibold text-amber-800">AI Failure Explanation</p>
-              </div>
-              <p className="text-xs text-slate-700 leading-relaxed">
-                <span className="text-amber-700 font-mono">test_checkout_missing_info</span> failed
-                because the error message selector{" "}
-                <span className="font-mono text-red-700">[data-test=&apos;error&apos;]</span> was
-                not found in the DOM. The element may have a dynamic class. C3 Self-Healing will
-                attempt to locate an alternative selector.
-              </p>
+          {/* Download PDF + Log */}
+          {runId && (
+            <div className="flex flex-col gap-2">
+              <a
+                href={runPdfUrl(runId)}
+                target="_blank"
+                rel="noreferrer"
+                aria-disabled={!pdfReady}
+                onClick={(e) => { if (!pdfReady) e.preventDefault(); }}
+                className={`w-full flex items-center justify-center gap-2 py-3 border rounded-xl text-sm font-medium transition-all shadow-sm ${
+                  pdfReady
+                    ? "bg-purple-600 hover:bg-purple-700 border-purple-700 text-white"
+                    : "bg-white border-slate-200 text-slate-400 cursor-not-allowed"
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                {pdfReady ? "Download PDF Report" : "PDF generating…"}
+              </a>
+              <a
+                href={runLogUrl(runId)}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 text-slate-700 hover:text-slate-900 rounded-xl text-sm font-medium transition-all shadow-sm"
+              >
+                <Download className="w-4 h-4" />
+                Download Raw Log (saved in DB)
+              </a>
             </div>
           )}
 
-          {/* Download */}
-          {isDone && (
-            <button className="w-full flex items-center justify-center gap-2 py-3 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 text-slate-700 hover:text-slate-900 rounded-xl text-sm font-medium transition-all shadow-sm">
-              <Download className="w-4 h-4" />
-              Download PDF Report
-            </button>
-          )}
-
           {/* Pipeline complete */}
-          {isDone && (
+          {isDone && status === "passed" && (
             <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
               <CheckCircle className="w-6 h-6 text-emerald-600 mx-auto mb-2" />
               <p className="text-xs font-semibold text-emerald-800">Pipeline Complete</p>
               <p className="text-[11px] text-slate-600 mt-1">
-                Results written to PostgreSQL · C3 &amp; C4 notified
+                Results, log, and screenshots written to PostgreSQL · C3 &amp; C4 notified
               </p>
               <Link
                 href="/dashboard"
@@ -367,5 +503,62 @@ export default function ExecutionPage() {
         </div>
       </div>
     </DashboardLayoutWrapper>
+  );
+}
+
+function statusColor(status: string): string {
+  if (status === "passed") return "text-emerald-700";
+  if (status === "failed") return "text-red-700";
+  if (status === "error")  return "text-amber-700";
+  if (status === "running" || status === "queued") return "text-blue-700";
+  return "text-slate-700";
+}
+
+function ScreenshotGrid({ screenshots }: { screenshots: RunScreenshot[] }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+        <div className="flex items-center gap-2">
+          <ImageIcon className="w-4 h-4 text-purple-600" />
+          <p className="text-sm font-semibold text-slate-800">Captured Screenshots</p>
+        </div>
+        <span className="text-xs text-slate-500">{screenshots.length} frame{screenshots.length === 1 ? "" : "s"}</span>
+      </div>
+      <div className="p-4 grid grid-cols-3 gap-3">
+        {screenshots.map((s) => (
+          <div
+            key={s.scenario}
+            className={`rounded-lg border overflow-hidden ${
+              s.status === "failed" ? "border-red-300" : "border-slate-200"
+            }`}
+          >
+            {/* Use <img> not Next/Image so the backend-served PNG works without
+                Next.js needing a remotePattern allow-list. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={s.image_url}
+              alt={s.label}
+              className="w-full h-28 object-cover bg-slate-50"
+            />
+            <div className="px-2.5 py-2 bg-white flex items-center justify-between">
+              <p className="text-[11px] text-slate-600 truncate">{s.label}</p>
+              {s.status === "passed" ? (
+                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              ) : (
+                <XCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function ExecutionPage() {
+  return (
+    <Suspense fallback={<div className="p-8">Loading Execution…</div>}>
+      <ExecutionContent />
+    </Suspense>
   );
 }

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>NextGen QA · Run {{ run.id }}</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      color: #0f172a;
+      background: #fff;
+    }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      padding: 18mm 16mm;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: auto; }
+
+    h1 { font-size: 26pt; margin: 0 0 4pt; letter-spacing: -0.5pt; }
+    h2 { font-size: 14pt; margin: 24pt 0 8pt; padding-bottom: 4pt; border-bottom: 1px solid #e2e8f0; }
+    h3 { font-size: 11pt; margin: 12pt 0 6pt; color: #334155; }
+    p, li { font-size: 10.5pt; line-height: 1.55; color: #1e293b; }
+    small, .meta { color: #64748b; font-size: 9pt; }
+
+    /* Cover */
+    .cover-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 36pt;
+    }
+    .brand {
+      display: inline-flex; gap: 10pt; align-items: center;
+      padding: 8pt 14pt;
+      border-radius: 999pt;
+      background: linear-gradient(135deg, #7c3aed, #4f46e5);
+      color: white; font-weight: 600; font-size: 11pt;
+    }
+    .status-pill {
+      display: inline-block;
+      padding: 6pt 14pt;
+      border-radius: 999pt;
+      font-weight: 700; font-size: 11pt;
+      letter-spacing: 0.5pt;
+    }
+    .status-passed { background: #d1fae5; color: #065f46; }
+    .status-failed { background: #fee2e2; color: #991b1b; }
+    .status-error  { background: #fef3c7; color: #92400e; }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14pt;
+      margin: 18pt 0 24pt;
+    }
+    .summary-tile {
+      border: 1px solid #e2e8f0;
+      border-radius: 10pt;
+      padding: 14pt 16pt;
+      background: #f8fafc;
+    }
+    .summary-tile .v { font-size: 22pt; font-weight: 700; color: #0f172a; }
+    .summary-tile .l { font-size: 9pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.5pt; }
+
+    /* Donut */
+    .chart-wrap {
+      display: flex; align-items: center; gap: 24pt;
+      margin: 20pt 0;
+      padding: 18pt;
+      border: 1px solid #e2e8f0;
+      border-radius: 12pt;
+      background: #f8fafc;
+    }
+    .donut { position: relative; width: 120pt; height: 120pt; flex-shrink: 0; }
+    .donut svg { transform: rotate(-90deg); }
+    .donut .pct {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20pt; font-weight: 700; color: #0f172a;
+    }
+    .legend { font-size: 10pt; color: #334155; }
+    .legend .row { display: flex; align-items: center; gap: 6pt; margin: 3pt 0; }
+    .legend .sw { width: 9pt; height: 9pt; border-radius: 2pt; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-top: 8pt; }
+    th, td { text-align: left; padding: 6pt 8pt; border-bottom: 1px solid #f1f5f9; }
+    th { color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4pt; font-size: 8.5pt; }
+    .ok { color: #065f46; font-weight: 600; }
+    .bad { color: #991b1b; font-weight: 600; }
+
+    .screenshots {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; margin-top: 10pt;
+    }
+    .shot { border: 1px solid #e2e8f0; border-radius: 6pt; overflow: hidden; }
+    .shot.failed { border-color: #fecaca; }
+    .shot img { width: 100%; height: 90pt; object-fit: cover; display: block; background: #f8fafc; }
+    .shot .cap { padding: 4pt 8pt; font-size: 8.5pt; display: flex; justify-content: space-between; }
+    .shot .cap .name { color: #334155; }
+
+    .kv { display: grid; grid-template-columns: 130pt 1fr; gap: 4pt 12pt; font-size: 10pt; }
+    .kv dt { color: #64748b; }
+    .kv dd { margin: 0; color: #0f172a; }
+
+    .footer {
+      margin-top: 28pt; padding-top: 10pt;
+      border-top: 1px solid #e2e8f0;
+      font-size: 8.5pt; color: #94a3b8;
+      display: flex; justify-content: space-between;
+    }
+
+    code { font-family: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace; font-size: 9pt; background: #f1f5f9; padding: 1pt 4pt; border-radius: 3pt; }
+  </style>
+</head>
+<body>
+
+  {# ── Page 1: Cover & summary ─────────────────────────────────────────── #}
+  <div class="page">
+    <div class="cover-header">
+      <span class="brand">NextGen QA · Component 2</span>
+      <span class="status-pill status-{{ run.status }}">{{ run.status|upper }}</span>
+    </div>
+
+    <h1>Test Execution Report</h1>
+    <p class="meta">
+      Run <code>{{ run.id }}</code> ·
+      Framework <strong>{{ run.framework }}</strong> ·
+      Mode <strong>{{ run.mode }}</strong>
+    </p>
+
+    <div class="summary-grid">
+      <div class="summary-tile"><div class="v">{{ run.total_count }}</div><div class="l">Total Scenarios</div></div>
+      <div class="summary-tile"><div class="v" style="color:#059669;">{{ run.passed_count }}</div><div class="l">Passed</div></div>
+      <div class="summary-tile"><div class="v" style="color:#dc2626;">{{ run.failed_count }}</div><div class="l">Failed</div></div>
+    </div>
+
+    <div class="chart-wrap">
+      <div class="donut">
+        {% set radius = 50 %}
+        {% set circ = 2 * 3.14159 * radius %}
+        {% set passed_arc = circ * (run.passed_count / (run.total_count if run.total_count else 1)) %}
+        <svg width="120" height="120" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="{{ radius }}" stroke="#fee2e2" stroke-width="14" fill="none" />
+          <circle cx="60" cy="60" r="{{ radius }}"
+                  stroke="#10b981" stroke-width="14" fill="none"
+                  stroke-dasharray="{{ passed_arc }} {{ circ }}"
+                  stroke-linecap="butt" />
+        </svg>
+        <div class="pct">{{ pass_pct }}%</div>
+      </div>
+      <div class="legend">
+        <div class="row"><span class="sw" style="background:#10b981"></span>Passed · {{ run.passed_count }}</div>
+        <div class="row"><span class="sw" style="background:#ef4444"></span>Failed · {{ run.failed_count }}</div>
+        <div class="row"><span class="sw" style="background:#cbd5e1"></span>Duration · {{ run.duration_ms|fdur }}</div>
+        {% if run.github_run_url %}
+        <div class="row meta">GitHub run · {{ run.github_run_url }}</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <h2>Pipeline Metadata</h2>
+    <dl class="kv">
+      <dt>Project ID</dt><dd><code>{{ run.project_id }}</code></dd>
+      {% if suite %}
+        <dt>Suite</dt><dd>{{ suite.filename }} (v{{ suite.version }})</dd>
+        <dt>Generation Mode</dt><dd>{{ "B · DOM-Aware" if suite.mode == "dom" else "A · Abstract" }}</dd>
+        <dt>Staging URL</dt><dd><code>{{ suite.url }}</code></dd>
+      {% endif %}
+      <dt>Started</dt><dd>{{ run.started_at|fdt }}</dd>
+      <dt>Finished</dt><dd>{{ run.finished_at|fdt }}</dd>
+      <dt>Execution Mode</dt><dd>{{ run.mode }}{% if run.github_branch %} ({{ run.github_branch }}){% endif %}</dd>
+    </dl>
+
+    <div class="footer">
+      <span>Generated {{ generated_at|fdt }}</span>
+      <span>R26-SE-039 · SLIIT Faculty of Computing</span>
+    </div>
+  </div>
+
+  {# ── Page 2: Screenshots ─────────────────────────────────────────── #}
+  {% if screenshots %}
+  <div class="page">
+    <h1>Captured Screenshots</h1>
+    <p class="meta">Frames captured by the runner during each scenario.</p>
+    <div class="screenshots">
+      {% for s in screenshots %}
+      <div class="shot {{ 'failed' if s.status == 'failed' else '' }}">
+        {% if s.src %}<img src="{{ s.src }}" alt="{{ s.label }}" />{% else %}<div style="height:90pt;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:8pt;">[no image]</div>{% endif %}
+        <div class="cap">
+          <span class="name">{{ s.label }}</span>
+          <span class="{{ 'bad' if s.status == 'failed' else 'ok' }}">{{ s.status }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Page 3: Raw log tail ─────────────────────────────────────────── #}
+  <div class="page">
+    <h1>Execution Log</h1>
+    <p class="meta">
+      Full log archived in the database. The last 200 lines are shown below;
+      download the full log from the dashboard for the complete trace.
+    </p>
+    <pre style="background:#0f172a;color:#e2e8f0;padding:12pt;border-radius:8pt;font-family:'JetBrains Mono',Menlo,monospace;font-size:8.5pt;line-height:1.5;white-space:pre-wrap;word-break:break-all;">
+{%- set lines = (run.raw_log_text or '').splitlines() -%}
+{{ '\n'.join(lines[-200:]) }}
+    </pre>
+
+    <div class="footer">
+      <span>NextGen QA · {{ generated_at|fdt }}</span>
+      <span>Run {{ run.id }}</span>
+    </div>
+  </div>
+
+</body>
+</html>

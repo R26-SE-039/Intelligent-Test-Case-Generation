@@ -497,6 +497,127 @@ export async function getRiskPredictions(projectId: string): Promise<RiskRespons
   return request<RiskResponse>(`/api/v1/projects/${projectId}/risk`);
 }
 
+// ─── Execution & Report API ──────────────────────────────────────────────────
+
+export interface ExecuteResponse {
+  run_id: string;
+  mode: string;
+}
+
+export interface RunSummary {
+  id: string;
+  project_id: string;
+  suite_id?: string | null;
+  framework: string;
+  mode: string;
+  status: string;
+  github_run_id?: string | null;
+  github_run_url?: string | null;
+  github_branch?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  total_count: number;
+  passed_count: number;
+  failed_count: number;
+  pdf_url?: string | null;
+  log_url: string;
+  error_message?: string | null;
+}
+
+export interface RunScenario {
+  scenario_name: string;
+  flow_name: string;
+  status: string;
+  duration_ms?: number | null;
+  error_message?: string | null;
+}
+
+export interface RunScreenshot {
+  scenario: string;
+  label: string;
+  status: string;
+  image_url: string;
+}
+
+export interface RunDetail extends RunSummary {
+  scenarios: RunScenario[];
+  screenshots: RunScreenshot[];
+  raw_log_preview: string;
+}
+
+export type ExecutionEvent =
+  | { type: "step"; step: string; status: string }
+  | { type: "log"; line: string }
+  | { type: "github"; run_url: string; branch: string }
+  | { type: "pdf_ready"; url: string }
+  | { type: "done"; status: string; passed: number; failed: number; total: number; duration_ms: number }
+  | { type: "error"; message: string }
+  | { type: "end" };
+
+/** Trigger an execution run. Returns the run_id (subscribe to WS immediately). */
+export async function executeSuite(params: {
+  suiteId: string;
+  projectId: string;
+  mode?: "github" | "local";
+}): Promise<ExecuteResponse> {
+  return request<ExecuteResponse>("/api/v1/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      suite_id: params.suiteId,
+      project_id: params.projectId,
+      mode: params.mode,
+    }),
+    timeoutMs: 60_000,
+  });
+}
+
+/** List recent runs for a project (newest first). */
+export async function listRuns(projectId: string, limit = 20): Promise<RunSummary[]> {
+  return request<RunSummary[]>(
+    `/api/v1/runs?project_id=${encodeURIComponent(projectId)}&limit=${limit}`,
+  );
+}
+
+/** Fetch one run + scenarios + screenshots + log preview. */
+export async function getRun(runId: string): Promise<RunDetail> {
+  return request<RunDetail>(`/api/v1/runs/${runId}`);
+}
+
+/** Subscribe to the live execution WebSocket. */
+export function openExecutionStream(
+  runId: string,
+  onEvent: (event: ExecutionEvent) => void,
+): WebSocket {
+  const wsBase = BASE_URL.replace(/^http/, "ws");
+  const ws = new WebSocket(`${wsBase}/ws/execution/${encodeURIComponent(runId)}`);
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data) as ExecutionEvent;
+      onEvent(data);
+      if (data.type === "end") ws.close();
+    } catch {
+      // malformed frame — ignore
+    }
+  };
+  return ws;
+}
+
+/** Absolute URL for the raw log download. */
+export function runLogUrl(runId: string): string {
+  return `${BASE_URL}/api/v1/runs/${runId}/log`;
+}
+
+/** Absolute URL for the generated PDF report. */
+export function runPdfUrl(runId: string): string {
+  return `${BASE_URL}/api/v1/runs/${runId}/report.pdf`;
+}
+
+/** Absolute URL for a captured screenshot (image served from disk). */
+export function runScreenshotUrl(runId: string, filename: string): string {
+  return `${BASE_URL}/api/v1/runs/${runId}/screenshots/${encodeURIComponent(filename)}`;
+}
+
 // ─── Agent Explorer API ──────────────────────────────────────────────────────
 
 export interface AgentSomElement {

@@ -20,6 +20,8 @@ from app.routes import router
 from app.dom_crawler import log_broker
 from app.agent_explorer import agent_broker
 from app.agent_explorer.routes import router as agent_router, register_agent_websocket
+from app.execution import log_broker as execution_log_broker
+from app.execution.routes import router as execution_router, register_execution_websocket
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,6 +35,7 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_running_loop()
     log_broker.bind_loop(loop)
     agent_broker.bind_loop(loop)
+    execution_log_broker.bind_loop(loop)
     logger.info("Database ready.")
     yield
     logger.info("Shutting down.")
@@ -57,7 +60,9 @@ app.add_middleware(
 # All pipeline routes
 app.include_router(router)
 app.include_router(agent_router)
+app.include_router(execution_router)
 register_agent_websocket(app)
+register_execution_websocket(app)
 
 
 @app.get("/")
@@ -68,21 +73,6 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
-
-
-@app.websocket("/ws/execution/{run_id}")
-async def execution_stream(websocket: WebSocket, run_id: str):
-    await websocket.accept()
-    logger.info(f"WebSocket client connected for run_id: {run_id}")
-    try:
-        await websocket.send_json({
-            "step": "Initializing run",
-            "status": "running",
-        })
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-    finally:
-        logger.info(f"WebSocket client disconnected for run_id: {run_id}")
 
 
 @app.websocket("/ws/dom/crawl/{run_id}")
