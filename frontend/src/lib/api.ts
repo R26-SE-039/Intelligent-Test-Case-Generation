@@ -61,6 +61,9 @@ export interface TestSuite {
   source_scenarios_hash: string;
   source_scenario_count: number;
   is_stale: boolean;
+  version: number;
+  is_active: boolean;
+  selected_for_run: boolean;
   updated_at?: string | null;
 }
 
@@ -234,12 +237,31 @@ export async function generateTestCode(
   });
 }
 
-/** Load persisted test suites for a project (no LLM calls). */
+/**
+ * Load the active head of each (project, framework) chain — no LLM calls.
+ * Older versions live in the history endpoint.
+ */
 export async function getTestSuites(projectId: string): Promise<TestSuite[]> {
   return request<TestSuite[]>(`/api/v1/code/suites?project_id=${encodeURIComponent(projectId)}`);
 }
 
-/** Save QA edits to a suite's code without regenerating. */
+/** Fetch a single suite by id (any version — used by the dedicated editor). */
+export async function getTestSuite(suiteId: string): Promise<TestSuite> {
+  return request<TestSuite>(`/api/v1/code/suites/${suiteId}`);
+}
+
+/**
+ * Every version of the (project, framework) chain that `suiteId` belongs to,
+ * newest first. Powers the version dropdown.
+ */
+export async function getTestSuiteHistory(suiteId: string): Promise<TestSuite[]> {
+  return request<TestSuite[]>(`/api/v1/code/suites/${suiteId}/history`);
+}
+
+/**
+ * Autosave QA edits into the active head. Editing a historical (is_active=false)
+ * suite returns 409 — the UI must restore it first.
+ */
 export async function updateTestSuiteCode(
   suiteId: string,
   code: string,
@@ -247,6 +269,40 @@ export async function updateTestSuiteCode(
   return request<TestSuite>(`/api/v1/code/suites/${suiteId}`, {
     method: "PUT",
     body: JSON.stringify({ code }),
+  });
+}
+
+/**
+ * Snapshot the current code as a fresh version (version + 1). The prior head
+ * is deactivated but preserved in history.
+ */
+export async function saveTestSuiteAsNewVersion(
+  suiteId: string,
+  code: string,
+): Promise<TestSuite> {
+  return request<TestSuite>(`/api/v1/code/suites/${suiteId}/save-as-new-version`, {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+}
+
+/**
+ * Copy a historical version's code forward as a new head row.
+ * History stays append-only — the old row remains in place.
+ */
+export async function restoreTestSuiteVersion(suiteId: string): Promise<TestSuite> {
+  return request<TestSuite>(`/api/v1/code/suites/${suiteId}/restore`, {
+    method: "POST",
+  });
+}
+
+/**
+ * Mark this suite as the framework + version CI/CD should execute next.
+ * Only one suite per project carries the flag at a time.
+ */
+export async function selectTestSuiteForRun(suiteId: string): Promise<TestSuite> {
+  return request<TestSuite>(`/api/v1/code/suites/${suiteId}/select-for-run`, {
+    method: "POST",
   });
 }
 

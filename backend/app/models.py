@@ -101,7 +101,19 @@ class GherkinScenario(Base):
 class TestSuite(Base):
     """
     Persisted test code generated from approved Gherkin scenarios.
-    One row per (project_id, framework) — regeneration upserts.
+
+    History model — each (project, framework) is a chain of versions:
+      - `version` is a 1-based incrementing counter per (project, framework).
+      - `is_active=True` marks the head of the chain (the latest version that
+        autosaves apply to; appears in the Code Review list).
+      - `selected_for_run=True` marks the one suite (across the whole project)
+        that the next CI/CD run should execute. At most one row per project
+        carries this flag.
+
+    Regeneration INSERTs a fresh row at version+1, flips the prior head to
+    inactive. QA edits autosave into the active row. "Save as new version"
+    snapshots the active row. "Restore" copies an old version's code into a
+    new head row, so history is never destructive.
 
     source_scenarios_hash fingerprints the Gherkin inputs that produced this
     suite, so the UI can detect when scenarios have drifted and prompt the
@@ -110,7 +122,10 @@ class TestSuite(Base):
     """
     __tablename__ = "test_suites"
     __table_args__ = (
-        UniqueConstraint("project_id", "framework", name="uq_test_suites_project_framework"),
+        UniqueConstraint(
+            "project_id", "framework", "version",
+            name="uq_test_suites_project_framework_version",
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -129,6 +144,9 @@ class TestSuite(Base):
     source_scenarios_hash = Column(String(64), nullable=False)
     source_scenario_ids = Column(JSONB, nullable=False, default=list)
     source_scenario_count = Column(Integer, nullable=False, default=0)
+    version = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, nullable=False, default=True)
+    selected_for_run = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
