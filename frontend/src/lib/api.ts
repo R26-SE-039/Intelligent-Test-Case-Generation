@@ -618,6 +618,14 @@ export function runScreenshotUrl(runId: string, filename: string): string {
   return `${BASE_URL}/api/v1/runs/${runId}/screenshots/${encodeURIComponent(filename)}`;
 }
 
+/**
+ * Absolute URL for the live "newest frame" preview. The frontend appends a
+ * cache-buster on each poll so the browser actually re-fetches.
+ */
+export function runLatestFrameUrl(runId: string): string {
+  return `${BASE_URL}/api/v1/runs/${runId}/screenshots/latest`;
+}
+
 // ─── Agent Explorer API ──────────────────────────────────────────────────────
 
 export interface AgentSomElement {

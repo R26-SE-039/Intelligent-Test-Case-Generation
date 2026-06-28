@@ -233,14 +233,23 @@ async def run_suite_locally(
 
 # A conftest that:
 #   - injects a Playwright `page` fixture pre-configured for headless mode
-#   - takes a screenshot after every test (passed or failed) into reports/{run}/screenshots
+#   - captures LIVE FRAMES on every navigation/load so the dashboard can
+#     show a real-time browser preview (the "viva impact" feature)
+#   - takes a final screenshot after every test (passed or failed) into
+#     reports/{run}/screenshots
 #   - exposes STAGING_URL via env (already set by the parent process too)
+#
+# Live frames are timestamped (frame_<ms>.png) so the backend can serve "the
+# newest one" by lexical sort — no extra state file needed. They land in the
+# same screenshots/ directory; the per-test final shot uses the test name as
+# its filename so it doesn't collide.
 #
 # The placeholders __SCREENSHOTS_DIR__ / __STAGING_URL__ are substituted with
 # .replace() at write time so Python format-string syntax inside the body
 # (e.g. f-strings) survives unmolested.
 _CONFTEST_TEMPLATE = r'''
 import os
+import time
 import pytest
 from pathlib import Path
 
@@ -253,6 +262,20 @@ except ImportError:
     sync_playwright = None
 
 
+def _live_frame_path() -> Path:
+    """Monotonically-named PNG so backend can pick the newest by name sort."""
+    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    return SCREENSHOTS_DIR / f"frame_{int(time.time() * 1000)}.png"
+
+
+def _safe_snap(pg) -> None:
+    """Best-effort screenshot — never raises (page may be navigating)."""
+    try:
+        pg.screenshot(path=str(_live_frame_path()), full_page=False)
+    except Exception:
+        pass
+
+
 @pytest.fixture(scope="session")
 def staging_url():
     return STAGING_URL
@@ -260,16 +283,34 @@ def staging_url():
 
 @pytest.fixture
 def page():
-    """Headless Playwright page shared with the generated test."""
+    """Headless Playwright page that streams live frames to the dashboard.
+
+    A snapshot is taken on:
+      - every page `load` event
+      - every `framenavigated` event (top frame only)
+      - test entry and exit (via the makereport hook below)
+    """
     if sync_playwright is None:
         pytest.skip("playwright not installed in runner environment")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(record_video_dir=None)
+        context = browser.new_context()
         pg = context.new_page()
+
+        # Live frame ticker — these listeners take a screenshot whenever
+        # the page settles or navigates. Each fires on the Playwright sync
+        # event loop so there's no cross-thread contention.
+        pg.on("load", lambda: _safe_snap(pg))
+        pg.on("framenavigated", lambda frame: _safe_snap(pg) if frame == pg.main_frame else None)
+
+        _safe_snap(pg)  # initial blank-tab frame so the dashboard has something
         try:
             yield pg
         finally:
+            try:
+                _safe_snap(pg)  # final state
+            except Exception:
+                pass
             try:
                 context.close()
             finally:
@@ -302,10 +343,11 @@ def pytest_runtest_makereport(item, call):
     if rep.when != "call":
         return
     SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-    # Best-effort: snapshot Playwright page if it exists in the test
-    # signature, otherwise Selenium driver.
+    # Final per-test screenshot, named after the test so the dashboard
+    # screenshot grid can label it cleanly. Live frames live alongside
+    # under the frame_<ms>.png naming convention.
     try:
-        for fixture_name, target in [("page", "screenshot"), ("driver", "save_screenshot")]:
+        for fixture_name in ("page", "driver"):
             obj = item.funcargs.get(fixture_name)
             if obj is None:
                 continue

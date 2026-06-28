@@ -27,6 +27,7 @@ import {
   getRun,
   getTestSuites,
   openExecutionStream,
+  runLatestFrameUrl,
   runLogUrl,
   runPdfUrl,
   type ExecutionEvent,
@@ -72,8 +73,15 @@ function ExecutionContent() {
   const [pdfReady, setPdfReady] = useState(false);
   const [ghRunUrl, setGhRunUrl] = useState<string | null>(null);
 
+  // Live "Browser Preview" — a cache-busted URL we update every ~600ms while
+  // the run is active. The browser only re-fetches when the query string
+  // changes, so this is bandwidth-cheap and gives a flipbook feel.
+  const [livePreviewSrc, setLivePreviewSrc] = useState<string | null>(null);
+  const [livePreviewLoaded, setLivePreviewLoaded] = useState(false);
+
   const logRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const livePollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load the suite metadata up front so we can show the user what's about to run.
   useEffect(() => {
@@ -108,6 +116,36 @@ function ExecutionContent() {
 
   // Cleanup WS on unmount.
   useEffect(() => () => { wsRef.current?.close(); }, []);
+
+  // Live preview poller — only runs while a run is in flight. Cache-busts the
+  // URL with the current millisecond timestamp so the browser actually re-pulls.
+  useEffect(() => {
+    if (!runId || (status !== "running" && status !== "queued")) {
+      if (livePollTimer.current) {
+        clearInterval(livePollTimer.current);
+        livePollTimer.current = null;
+      }
+      return;
+    }
+    const tick = () => setLivePreviewSrc(`${runLatestFrameUrl(runId)}?t=${Date.now()}`);
+    tick();
+    livePollTimer.current = setInterval(tick, 600);
+    return () => {
+      if (livePollTimer.current) {
+        clearInterval(livePollTimer.current);
+        livePollTimer.current = null;
+      }
+    };
+  }, [runId, status]);
+
+  // One last refresh when the run completes so the final frame is on-screen
+  // instead of whatever the poller caught mid-render.
+  useEffect(() => {
+    if (!runId) return;
+    if (status === "passed" || status === "failed" || status === "error") {
+      setLivePreviewSrc(`${runLatestFrameUrl(runId)}?t=${Date.now()}`);
+    }
+  }, [runId, status]);
 
   const fetchRunDetail = useCallback(async (id: string) => {
     try {
@@ -154,6 +192,8 @@ function ExecutionContent() {
     setGhRunUrl(null);
     setError(null);
     setStatus("queued");
+    setLivePreviewSrc(null);
+    setLivePreviewLoaded(false);
 
     try {
       const resp = await executeSuite({
@@ -182,6 +222,8 @@ function ExecutionContent() {
     setError(null);
     setPdfReady(false);
     setGhRunUrl(null);
+    setLivePreviewSrc(null);
+    setLivePreviewLoaded(false);
   };
 
   const isDone = status === "passed" || status === "failed" || status === "error";
@@ -304,8 +346,19 @@ function ExecutionContent() {
       )}
 
       <div className="p-6 grid grid-cols-3 gap-5">
-        {/* Left: Log + Screenshots */}
+        {/* Left: Live Preview + Log + Screenshots */}
         <div className="col-span-2 flex flex-col gap-5">
+          {/* Live Browser Preview — flipbook of the headless browser */}
+          {(runId || isDone) && (
+            <LiveBrowserPreview
+              src={livePreviewSrc}
+              status={status}
+              loaded={livePreviewLoaded}
+              onLoad={() => setLivePreviewLoaded(true)}
+              ghRunUrl={ghRunUrl}
+            />
+          )}
+
           {/* Live Log */}
           <div className="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-sm">
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
@@ -453,35 +506,41 @@ function ExecutionContent() {
             </div>
           )}
 
-          {/* Download PDF + Log */}
-          {runId && (
-            <div className="flex flex-col gap-2">
-              <a
-                href={runPdfUrl(runId)}
-                target="_blank"
-                rel="noreferrer"
-                aria-disabled={!pdfReady}
-                onClick={(e) => { if (!pdfReady) e.preventDefault(); }}
-                className={`w-full flex items-center justify-center gap-2 py-3 border rounded-xl text-sm font-medium transition-all shadow-sm ${
-                  pdfReady
-                    ? "bg-purple-600 hover:bg-purple-700 border-purple-700 text-white"
-                    : "bg-white border-slate-200 text-slate-400 cursor-not-allowed"
-                }`}
-              >
-                <FileText className="w-4 h-4" />
-                {pdfReady ? "Download PDF Report" : "PDF generating…"}
-              </a>
-              <a
-                href={runLogUrl(runId)}
-                target="_blank"
-                rel="noreferrer"
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 text-slate-700 hover:text-slate-900 rounded-xl text-sm font-medium transition-all shadow-sm"
-              >
-                <Download className="w-4 h-4" />
-                Download Raw Log (saved in DB)
-              </a>
-            </div>
-          )}
+          {/* Download PDF + Log. The button is "ready" when EITHER the WS
+              pdf_ready event fired OR the refetched run detail came back
+              with a pdf_url — covers the case where the WS frame was
+              missed (e.g. user landed on the page after the run finished). */}
+          {runId && (() => {
+            const ready = pdfReady || Boolean(runDetail?.pdf_url);
+            return (
+              <div className="flex flex-col gap-2">
+                <a
+                  href={runPdfUrl(runId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-disabled={!ready}
+                  onClick={(e) => { if (!ready) e.preventDefault(); }}
+                  className={`w-full flex items-center justify-center gap-2 py-3 border rounded-xl text-sm font-medium transition-all shadow-sm ${
+                    ready
+                      ? "bg-purple-600 hover:bg-purple-700 border-purple-700 text-white"
+                      : "bg-white border-slate-200 text-slate-400 cursor-not-allowed"
+                  }`}
+                >
+                  <FileText className="w-4 h-4" />
+                  {ready ? "Download PDF Report" : "PDF generating…"}
+                </a>
+                <a
+                  href={runLogUrl(runId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 text-slate-700 hover:text-slate-900 rounded-xl text-sm font-medium transition-all shadow-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Download Raw Log (saved in DB)
+                </a>
+              </div>
+            );
+          })()}
 
           {/* Pipeline complete */}
           {isDone && status === "passed" && (
@@ -512,6 +571,71 @@ function statusColor(status: string): string {
   if (status === "error")  return "text-amber-700";
   if (status === "running" || status === "queued") return "text-blue-700";
   return "text-slate-700";
+}
+
+interface LiveBrowserPreviewProps {
+  src: string | null;
+  status: Status;
+  loaded: boolean;
+  onLoad: () => void;
+  ghRunUrl: string | null;
+}
+
+function LiveBrowserPreview({ src, status, loaded, onLoad, ghRunUrl }: LiveBrowserPreviewProps) {
+  const isLive = status === "running" || status === "queued";
+  const tone =
+    status === "passed" ? "bg-emerald-500" :
+    status === "failed" ? "bg-red-500" :
+    status === "error"  ? "bg-amber-500" :
+    isLive              ? "bg-blue-500"   : "bg-slate-400";
+  const label =
+    status === "passed" ? "Final state · passed" :
+    status === "failed" ? "Final state · failed" :
+    status === "error"  ? "Final state · error" :
+    status === "queued" ? "Waiting for first frame" : "Live · headless Chromium";
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-900 overflow-hidden shadow-lg">
+      {/* Mock browser chrome */}
+      <div className="flex items-center gap-2 px-4 py-2 bg-slate-800 border-b border-slate-700">
+        <div className="flex gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
+        </div>
+        <div className="flex-1 mx-3 px-3 py-1 bg-slate-900/70 border border-slate-700 rounded text-[11px] font-mono text-slate-400 truncate">
+          {ghRunUrl ? "github-actions://runner" : "playwright://headless-chromium"}
+        </div>
+        <span className="flex items-center gap-1.5 text-[11px] text-slate-300">
+          <span className={`w-1.5 h-1.5 rounded-full ${tone} ${isLive ? "animate-pulse" : ""}`} />
+          {label}
+        </span>
+      </div>
+
+      {/* Live frame display — fixed aspect ratio so the page doesn't jump
+          while frames load at different sizes. */}
+      <div className="relative bg-black" style={{ aspectRatio: "16 / 9" }}>
+        {src && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={src}
+            src={src}
+            alt="Browser preview"
+            onLoad={onLoad}
+            className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-300 ${
+              loaded ? "opacity-100" : "opacity-0"
+            }`}
+          />
+        )}
+        {(!src || !loaded) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-sm gap-2">
+            <Loader2 className="w-6 h-6 animate-spin text-slate-500" />
+            {isLive ? "Capturing first frame…" : "No preview available"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ScreenshotGrid({ screenshots }: { screenshots: RunScreenshot[] }) {

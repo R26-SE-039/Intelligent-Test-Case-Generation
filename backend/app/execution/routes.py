@@ -248,6 +248,27 @@ async def download_run_pdf(run_id: str, db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/runs/{run_id}/screenshots/latest")
+async def serve_latest_screenshot(run_id: str):
+    """
+    Newest frame in ./reports/{run_id}/screenshots/ — used by the live
+    "Browser Preview" panel which polls this endpoint while the run is
+    active. Returns 404 with `Cache-Control: no-store` until a frame
+    exists, then the freshest PNG.
+    """
+    folder = REPORTS_ROOT / run_id / "screenshots"
+    if not folder.exists():
+        raise HTTPException(status_code=404, detail="No frames yet")
+    pngs = sorted(folder.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not pngs:
+        raise HTTPException(status_code=404, detail="No frames yet")
+    return FileResponse(
+        pngs[0],
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get("/runs/{run_id}/screenshots/{filename}")
 async def serve_screenshot(run_id: str, filename: str):
     """Static PNG from ./reports/{run_id}/screenshots/."""
