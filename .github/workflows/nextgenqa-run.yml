@@ -1,0 +1,90 @@
+name: NextGen QA Auto Test Run
+
+# Triggered by FastAPI via the GitHub REST API (workflow_dispatch). When the
+# backend pushes a suite to a `runs/{run_id}` branch, it dispatches this
+# workflow with run_id, framework, and staging_url. The final step notifies
+# NextGenQA so the dashboard can persist the run as complete.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'NextGen QA run id (UUID)'
+        required: true
+      framework:
+        description: 'selenium | playwright | cypress'
+        required: true
+        default: 'playwright'
+      staging_url:
+        description: 'Target staging URL'
+        required: true
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: ${{ inputs.framework != 'cypress' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node
+        if: ${{ inputs.framework == 'cypress' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright runner
+        if: ${{ inputs.framework == 'playwright' }}
+        run: |
+          pip install pytest pytest-playwright allure-pytest
+          playwright install --with-deps chromium
+
+      - name: Install Selenium runner
+        if: ${{ inputs.framework == 'selenium' }}
+        run: |
+          pip install pytest selenium webdriver-manager allure-pytest
+
+      - name: Install Cypress
+        if: ${{ inputs.framework == 'cypress' }}
+        run: |
+          npm install --save-dev cypress
+
+      - name: Run Python tests
+        if: ${{ inputs.framework != 'cypress' }}
+        run: |
+          pytest tests/ -v --tb=short --alluredir=allure-results
+        env:
+          STAGING_URL: ${{ inputs.staging_url }}
+
+      - name: Run Cypress
+        if: ${{ inputs.framework == 'cypress' }}
+        run: |
+          npx cypress run --spec tests/
+        env:
+          CYPRESS_baseUrl: ${{ inputs.staging_url }}
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextgenqa-${{ inputs.run_id }}
+          path: |
+            **/screenshots/
+            allure-results/
+            cypress/screenshots/
+            cypress/videos/
+          if-no-files-found: ignore
+
+      - name: Notify NextGen QA backend
+        if: always() && env.NEXTGENQA_WEBHOOK_URL != ''
+        run: |
+          curl -X POST "$NEXTGENQA_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d '{"run_id":"${{ inputs.run_id }}","github_run_id":"${{ github.run_id }}","status":"${{ job.status }}","framework":"${{ inputs.framework }}"}' \
+            || echo "Webhook delivery failed (non-fatal)"
+        env:
+          NEXTGENQA_WEBHOOK_URL: ${{ secrets.NEXTGENQA_WEBHOOK_URL }}

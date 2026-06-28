@@ -14,6 +14,8 @@ Simple, plain-English script for presenting each page of the **NextGenQA** appli
 | 5 | [05-dom-inspector.md](05-dom-inspector.md) | DOM Inspector | Stage 4 |
 | 6 | [06-code-review.md](06-code-review.md) | Code Review | Stage 5 |
 | 7 | [07-execution.md](07-execution.md) | Execution | Final |
+| 8 | [08-agent-explorer.md](08-agent-explorer.md) | Agent Explorer | Novelty |
+| 8a | [08a-agent-explorer-architecture.md](08a-agent-explorer-architecture.md) | Agent Explorer — Architecture Diagrams | Novelty |
 
 ## Tip
 Read each file once before the viva, then practise the **Simple Speech** section out loud. The **Key points** at the bottom are quick reminders if the panel asks follow-up questions.

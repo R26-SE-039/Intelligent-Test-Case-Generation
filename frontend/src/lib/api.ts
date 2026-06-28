@@ -61,6 +61,9 @@ export interface TestSuite {
   source_scenarios_hash: string;
   source_scenario_count: number;
   is_stale: boolean;
+  version: number;
+  is_active: boolean;
+  selected_for_run: boolean;
   updated_at?: string | null;
 }
 
@@ -234,12 +237,31 @@ export async function generateTestCode(
   });
 }
 
-/** Load persisted test suites for a project (no LLM calls). */
+/**
+ * Load the active head of each (project, framework) chain — no LLM calls.
+ * Older versions live in the history endpoint.
+ */
 export async function getTestSuites(projectId: string): Promise<TestSuite[]> {
   return request<TestSuite[]>(`/api/v1/code/suites?project_id=${encodeURIComponent(projectId)}`);
 }
 
-/** Save QA edits to a suite's code without regenerating. */
+/** Fetch a single suite by id (any version — used by the dedicated editor). */
+export async function getTestSuite(suiteId: string): Promise<TestSuite> {
+  return request<TestSuite>(`/api/v1/code/suites/${suiteId}`);
+}
+
+/**
+ * Every version of the (project, framework) chain that `suiteId` belongs to,
+ * newest first. Powers the version dropdown.
+ */
+export async function getTestSuiteHistory(suiteId: string): Promise<TestSuite[]> {
+  return request<TestSuite[]>(`/api/v1/code/suites/${suiteId}/history`);
+}
+
+/**
+ * Autosave QA edits into the active head. Editing a historical (is_active=false)
+ * suite returns 409 — the UI must restore it first.
+ */
 export async function updateTestSuiteCode(
   suiteId: string,
   code: string,
@@ -247,6 +269,40 @@ export async function updateTestSuiteCode(
   return request<TestSuite>(`/api/v1/code/suites/${suiteId}`, {
     method: "PUT",
     body: JSON.stringify({ code }),
+  });
+}
+
+/**
+ * Snapshot the current code as a fresh version (version + 1). The prior head
+ * is deactivated but preserved in history.
+ */
+export async function saveTestSuiteAsNewVersion(
+  suiteId: string,
+  code: string,
+): Promise<TestSuite> {
+  return request<TestSuite>(`/api/v1/code/suites/${suiteId}/save-as-new-version`, {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+}
+
+/**
+ * Copy a historical version's code forward as a new head row.
+ * History stays append-only — the old row remains in place.
+ */
+export async function restoreTestSuiteVersion(suiteId: string): Promise<TestSuite> {
+  return request<TestSuite>(`/api/v1/code/suites/${suiteId}/restore`, {
+    method: "POST",
+  });
+}
+
+/**
+ * Mark this suite as the framework + version CI/CD should execute next.
+ * Only one suite per project carries the flag at a time.
+ */
+export async function selectTestSuiteForRun(suiteId: string): Promise<TestSuite> {
+  return request<TestSuite>(`/api/v1/code/suites/${suiteId}/select-for-run`, {
+    method: "POST",
   });
 }
 
@@ -439,4 +495,245 @@ export interface RiskResponse {
  * when the trained classifier is available, otherwise a heuristic fallback. */
 export async function getRiskPredictions(projectId: string): Promise<RiskResponse> {
   return request<RiskResponse>(`/api/v1/projects/${projectId}/risk`);
+}
+
+// ─── Execution & Report API ──────────────────────────────────────────────────
+
+export interface ExecuteResponse {
+  run_id: string;
+  mode: string;
+}
+
+export interface RunSummary {
+  id: string;
+  project_id: string;
+  suite_id?: string | null;
+  framework: string;
+  mode: string;
+  status: string;
+  github_run_id?: string | null;
+  github_run_url?: string | null;
+  github_branch?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  total_count: number;
+  passed_count: number;
+  failed_count: number;
+  pdf_url?: string | null;
+  log_url: string;
+  error_message?: string | null;
+}
+
+export interface RunScenario {
+  scenario_name: string;
+  flow_name: string;
+  status: string;
+  duration_ms?: number | null;
+  error_message?: string | null;
+}
+
+export interface RunScreenshot {
+  scenario: string;
+  label: string;
+  status: string;
+  image_url: string;
+}
+
+export interface RunDetail extends RunSummary {
+  scenarios: RunScenario[];
+  screenshots: RunScreenshot[];
+  raw_log_preview: string;
+}
+
+export type ExecutionEvent =
+  | { type: "step"; step: string; status: string }
+  | { type: "log"; line: string }
+  | { type: "github"; run_url: string; branch: string }
+  | { type: "pdf_ready"; url: string }
+  | { type: "done"; status: string; passed: number; failed: number; total: number; duration_ms: number }
+  | { type: "error"; message: string }
+  | { type: "end" };
+
+/** Trigger an execution run. Returns the run_id (subscribe to WS immediately). */
+export async function executeSuite(params: {
+  suiteId: string;
+  projectId: string;
+  mode?: "github" | "local";
+}): Promise<ExecuteResponse> {
+  return request<ExecuteResponse>("/api/v1/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      suite_id: params.suiteId,
+      project_id: params.projectId,
+      mode: params.mode,
+    }),
+    timeoutMs: 60_000,
+  });
+}
+
+/** List recent runs for a project (newest first). */
+export async function listRuns(projectId: string, limit = 20): Promise<RunSummary[]> {
+  return request<RunSummary[]>(
+    `/api/v1/runs?project_id=${encodeURIComponent(projectId)}&limit=${limit}`,
+  );
+}
+
+/** Fetch one run + scenarios + screenshots + log preview. */
+export async function getRun(runId: string): Promise<RunDetail> {
+  return request<RunDetail>(`/api/v1/runs/${runId}`);
+}
+
+/** Subscribe to the live execution WebSocket. */
+export function openExecutionStream(
+  runId: string,
+  onEvent: (event: ExecutionEvent) => void,
+): WebSocket {
+  const wsBase = BASE_URL.replace(/^http/, "ws");
+  const ws = new WebSocket(`${wsBase}/ws/execution/${encodeURIComponent(runId)}`);
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data) as ExecutionEvent;
+      onEvent(data);
+      if (data.type === "end") ws.close();
+    } catch {
+      // malformed frame — ignore
+    }
+  };
+  return ws;
+}
+
+/** Absolute URL for the raw log download. */
+export function runLogUrl(runId: string): string {
+  return `${BASE_URL}/api/v1/runs/${runId}/log`;
+}
+
+/** Absolute URL for the generated PDF report. */
+export function runPdfUrl(runId: string): string {
+  return `${BASE_URL}/api/v1/runs/${runId}/report.pdf`;
+}
+
+/** Absolute URL for a captured screenshot (image served from disk). */
+export function runScreenshotUrl(runId: string, filename: string): string {
+  return `${BASE_URL}/api/v1/runs/${runId}/screenshots/${encodeURIComponent(filename)}`;
+}
+
+/**
+ * Absolute URL for the live "newest frame" preview. The frontend appends a
+ * cache-buster on each poll so the browser actually re-fetches.
+ */
+export function runLatestFrameUrl(runId: string): string {
+  return `${BASE_URL}/api/v1/runs/${runId}/screenshots/latest`;
+}
+
+// ─── Agent Explorer API ──────────────────────────────────────────────────────
+
+export interface AgentSomElement {
+  id: number;
+  tag: string;
+  selector: string;
+  text: string;
+  role: string;
+  bbox: { x: number; y: number; w: number; h: number };
+  attrs: Record<string, string>;
+}
+
+export type AgentRole = "planner" | "actor" | "observer" | "critic";
+
+export type AgentEvent =
+  | { type: "status"; ts: number; message: string }
+  | {
+      type: "screenshot";
+      ts: number;
+      step: number;
+      b64: string;
+      elements: AgentSomElement[];
+      url: string;
+      title: string;
+      state_hash: string;
+      novel_state: boolean;
+      total_novel_states: number;
+    }
+  | { type: "thought"; ts: number; role: AgentRole; text: string; step: number }
+  | {
+      type: "action";
+      ts: number;
+      step: number;
+      action_type: string;
+      element_id?: number;
+      value?: string;
+      url?: string;
+      reason?: string;
+      success: boolean;
+      message: string;
+    }
+  | { type: "lesson"; ts: number; step: number; text: string }
+  | {
+      type: "coverage";
+      ts: number;
+      step: number;
+      goals_done: string[];
+      goals_pending: string[];
+    }
+  | {
+      type: "scenario_discovered";
+      ts: number;
+      step: number;
+      title: string;
+      steps: string[];
+    }
+  | {
+      type: "done";
+      ts: number;
+      reason: string;
+      total_steps: number;
+      total_novel_states: number;
+      scenarios: { title: string; steps: string[] }[];
+    }
+  | { type: "error"; ts: number; message: string }
+  | { type: "end" };
+
+export interface StartExplorationResponse {
+  run_id: string;
+  message: string;
+}
+
+/** Kick off an agent exploration run. Open `openAgentEventStream(run_id)`
+ *  immediately after this resolves to receive live events. */
+export async function startExploration(params: {
+  intent: string;
+  url: string;
+  projectId?: string;
+  maxSteps?: number;
+  headless?: boolean;
+}): Promise<StartExplorationResponse> {
+  return request<StartExplorationResponse>("/api/v1/agent/explore", {
+    method: "POST",
+    body: JSON.stringify({
+      intent: params.intent,
+      url: params.url,
+      project_id: params.projectId,
+      max_steps: params.maxSteps ?? 12,
+      headless: params.headless ?? false,
+    }),
+  });
+}
+
+/** Open a WebSocket that streams typed AgentEvent messages for a run. */
+export function openAgentEventStream(
+  runId: string,
+  onEvent: (event: AgentEvent) => void,
+): WebSocket {
+  const wsBase = BASE_URL.replace(/^http/, "ws");
+  const ws = new WebSocket(`${wsBase}/ws/agent/${encodeURIComponent(runId)}`);
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data) as AgentEvent;
+      onEvent(data);
+      if (data.type === "end") ws.close();
+    } catch {
+      // ignore malformed frames
+    }
+  };
+  return ws;
 }

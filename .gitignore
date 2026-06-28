@@ -2,6 +2,7 @@
 node_modules/
 .venv/
 .env
+reports/
 
 # MacOS
 .DS_Store

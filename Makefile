@@ -24,7 +24,7 @@ dev-frontend:
 	cd frontend && pnpm run dev
 
 dev-backend:
-	cd backend && ".venv/Scripts/python" -m uvicorn app.main:app --reload --port $(BACKEND_PORT)
+	cd backend && ".venv/Scripts/python" -m uvicorn app.main:app --reload --reload-dir app --port $(BACKEND_PORT)
 
 install:
 	npm install

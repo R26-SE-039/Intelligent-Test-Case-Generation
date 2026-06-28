@@ -173,6 +173,41 @@ async def init_db():
         await conn.run_sync(ModelBase.metadata.create_all)
 
         # ------------------------------------------------------------------
+        # Step 5.1: TestSuite versioning columns + constraint swap.
+        # Existing test_suites tables had a UNIQUE(project_id, framework)
+        # that destroyed prior code on regenerate. We add version/is_active/
+        # selected_for_run, then swap the unique key to include version.
+        # ------------------------------------------------------------------
+        await conn.execute(text("""
+            ALTER TABLE test_suites
+                ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1
+        """))
+        await conn.execute(text("""
+            ALTER TABLE test_suites
+                ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE
+        """))
+        await conn.execute(text("""
+            ALTER TABLE test_suites
+                ADD COLUMN IF NOT EXISTS selected_for_run BOOLEAN NOT NULL DEFAULT FALSE
+        """))
+        await conn.execute(text("""
+            ALTER TABLE test_suites
+                DROP CONSTRAINT IF EXISTS uq_test_suites_project_framework
+        """))
+        # Add the versioned unique key only if it isn't there yet.
+        constraint_exists = await conn.execute(text("""
+            SELECT COUNT(*) FROM information_schema.table_constraints
+            WHERE table_name = 'test_suites'
+              AND constraint_name = 'uq_test_suites_project_framework_version'
+        """))
+        if not constraint_exists.scalar():
+            await conn.execute(text("""
+                ALTER TABLE test_suites
+                    ADD CONSTRAINT uq_test_suites_project_framework_version
+                    UNIQUE (project_id, framework, version)
+            """))
+
+        # ------------------------------------------------------------------
         # Step 6: Fix stuck "processing" stories — mark as "done" if they
         # already have a Gherkin scenario generated.
         # ------------------------------------------------------------------

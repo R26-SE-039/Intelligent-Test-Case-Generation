@@ -22,7 +22,7 @@ Gherkin endpoints:
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func as sa_func, update
 from pydantic import BaseModel
 from typing import Optional
 import hashlib
@@ -573,6 +573,9 @@ class TestSuiteOut(BaseModel):
     source_scenarios_hash: str
     source_scenario_count: int
     is_stale: bool                      # current scenarios hash differs from stored
+    version: int
+    is_active: bool
+    selected_for_run: bool
     updated_at: Optional[str] = None
 
     class Config:
@@ -640,6 +643,9 @@ def _suite_out(s: TestSuite, current_hash: str) -> TestSuiteOut:
         source_scenarios_hash=s.source_scenarios_hash,
         source_scenario_count=s.source_scenario_count,
         is_stale=s.source_scenarios_hash != current_hash,
+        version=s.version,
+        is_active=s.is_active,
+        selected_for_run=s.selected_for_run,
         updated_at=s.updated_at.isoformat() if s.updated_at else None,
     )
 
@@ -672,9 +678,10 @@ async def generate_code(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Generate executable test code from the project's Gherkin scenarios + crawled
-    DOM elements, then upsert one TestSuite row per framework. Idempotent per
-    (project, framework).
+    Generate executable test code from the project's Gherkin scenarios +
+    crawled DOM elements. Each framework gets a *new* TestSuite row at
+    version+1 — the prior head of that chain is deactivated but kept on disk
+    so the QA can restore it from the dedicated editor's version dropdown.
     """
     result = await db.execute(
         select(GherkinScenario).where(GherkinScenario.project_id == body.project_id)
@@ -750,41 +757,44 @@ async def generate_code(
 
         language, filename = _framework_meta(framework)
 
-        existing_q = await db.execute(
-            select(TestSuite).where(
+        # Mark every prior version of this (project, framework) as inactive.
+        # The new row inserted below becomes the head of the chain.
+        await db.execute(
+            update(TestSuite)
+            .where(
+                TestSuite.project_id == body.project_id,
+                TestSuite.framework == framework,
+                TestSuite.is_active == True,  # noqa: E712
+            )
+            .values(is_active=False, selected_for_run=False)
+        )
+
+        next_version_q = await db.execute(
+            select(sa_func.coalesce(sa_func.max(TestSuite.version), 0)).where(
                 TestSuite.project_id == body.project_id,
                 TestSuite.framework == framework,
             )
         )
-        existing = existing_q.scalar_one_or_none()
+        next_version = int(next_version_q.scalar() or 0) + 1
 
-        if existing:
-            existing.code = generated_code
-            existing.language = language
-            existing.filename = filename
-            existing.mode = body.mode
-            existing.url = body.url
-            existing.source_scenarios_hash = combined_hash
-            existing.source_scenario_ids = scenario_ids
-            existing.source_scenario_count = scenario_count
-            db.add(existing)
-            saved.append(existing)
-        else:
-            suite = TestSuite(
-                id=uuid.uuid4(),
-                project_id=body.project_id,
-                framework=framework,
-                language=language,
-                filename=filename,
-                code=generated_code,
-                mode=body.mode,
-                url=body.url,
-                source_scenarios_hash=combined_hash,
-                source_scenario_ids=scenario_ids,
-                source_scenario_count=scenario_count,
-            )
-            db.add(suite)
-            saved.append(suite)
+        suite = TestSuite(
+            id=uuid.uuid4(),
+            project_id=body.project_id,
+            framework=framework,
+            language=language,
+            filename=filename,
+            code=generated_code,
+            mode=body.mode,
+            url=body.url,
+            source_scenarios_hash=combined_hash,
+            source_scenario_ids=scenario_ids,
+            source_scenario_count=scenario_count,
+            version=next_version,
+            is_active=True,
+            selected_for_run=False,
+        )
+        db.add(suite)
+        saved.append(suite)
 
     await db.commit()
     for s in saved:
@@ -799,13 +809,18 @@ async def list_test_suites(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Load persisted test suites for a project — no LLM calls.
+    Load the active head of each (project, framework) chain — no LLM calls.
     `is_stale` fires when EITHER the Gherkin scenarios OR the crawled DOM
     elements (for the suite's recorded URL) have changed since generation.
+
+    Past versions are accessed via /code/suites/{suite_id}/history.
     """
     suites_q = await db.execute(
         select(TestSuite)
-        .where(TestSuite.project_id == project_id)
+        .where(
+            TestSuite.project_id == project_id,
+            TestSuite.is_active == True,  # noqa: E712
+        )
         .order_by(TestSuite.framework.asc())
     )
     suites = suites_q.scalars().all()
@@ -824,13 +839,59 @@ async def list_test_suites(
     return out
 
 
+@router.get("/code/suites/{suite_id}", response_model=TestSuiteOut)
+async def get_test_suite(
+    suite_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetch one specific suite version (used by the dedicated editor page)."""
+    result = await db.execute(select(TestSuite).where(TestSuite.id == suite_id))
+    suite = result.scalar_one_or_none()
+    if not suite:
+        raise HTTPException(status_code=404, detail="Test suite not found")
+    current_hash = await _current_combined_hash(db, str(suite.project_id), suite.url)
+    return _suite_out(suite, current_hash)
+
+
+@router.get("/code/suites/{suite_id}/history", response_model=list[TestSuiteOut])
+async def get_test_suite_history(
+    suite_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Every version of the (project, framework) chain that `suite_id` belongs to,
+    newest first. Powers the version dropdown in the dedicated editor.
+    """
+    anchor_q = await db.execute(select(TestSuite).where(TestSuite.id == suite_id))
+    anchor = anchor_q.scalar_one_or_none()
+    if not anchor:
+        raise HTTPException(status_code=404, detail="Test suite not found")
+
+    rows_q = await db.execute(
+        select(TestSuite)
+        .where(
+            TestSuite.project_id == anchor.project_id,
+            TestSuite.framework == anchor.framework,
+        )
+        .order_by(TestSuite.version.desc())
+    )
+    rows = rows_q.scalars().all()
+
+    current_hash = await _current_combined_hash(db, str(anchor.project_id), anchor.url)
+    return [_suite_out(s, current_hash) for s in rows]
+
+
 @router.put("/code/suites/{suite_id}", response_model=TestSuiteOut)
 async def update_test_suite_code(
     suite_id: str,
     body: dict,
     db: AsyncSession = Depends(get_db),
 ):
-    """Persist QA edits to a suite's code without regenerating."""
+    """
+    Autosave QA edits into the active head version. Editing a historical
+    (is_active=False) row is rejected — the dedicated editor must "Restore"
+    first, which copies that version forward as a new head.
+    """
     new_code = body.get("code")
     if not isinstance(new_code, str):
         raise HTTPException(status_code=400, detail="`code` (string) is required")
@@ -839,6 +900,11 @@ async def update_test_suite_code(
     suite = result.scalar_one_or_none()
     if not suite:
         raise HTTPException(status_code=404, detail="Test suite not found")
+    if not suite.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot edit a historical version. Restore it to a new head first.",
+        )
 
     suite.code = new_code
     db.add(suite)
@@ -847,6 +913,168 @@ async def update_test_suite_code(
 
     current_hash = await _current_combined_hash(db, str(suite.project_id), suite.url)
     return _suite_out(suite, current_hash)
+
+
+@router.post("/code/suites/{suite_id}/save-as-new-version", response_model=TestSuiteOut)
+async def save_suite_as_new_version(
+    suite_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Snapshot the current code into a fresh row at version+1. Used by the
+    "Save as new version" button so QA can branch instead of overwriting the
+    current head. The new row becomes the active head; the prior head goes
+    inactive (its code is preserved as a historical version).
+    """
+    new_code = body.get("code")
+    if not isinstance(new_code, str):
+        raise HTTPException(status_code=400, detail="`code` (string) is required")
+
+    anchor_q = await db.execute(select(TestSuite).where(TestSuite.id == suite_id))
+    anchor = anchor_q.scalar_one_or_none()
+    if not anchor:
+        raise HTTPException(status_code=404, detail="Test suite not found")
+
+    # Deactivate the current head of the chain.
+    await db.execute(
+        update(TestSuite)
+        .where(
+            TestSuite.project_id == anchor.project_id,
+            TestSuite.framework == anchor.framework,
+            TestSuite.is_active == True,  # noqa: E712
+        )
+        .values(is_active=False, selected_for_run=False)
+    )
+
+    next_version_q = await db.execute(
+        select(sa_func.coalesce(sa_func.max(TestSuite.version), 0)).where(
+            TestSuite.project_id == anchor.project_id,
+            TestSuite.framework == anchor.framework,
+        )
+    )
+    next_version = int(next_version_q.scalar() or 0) + 1
+
+    new_row = TestSuite(
+        id=uuid.uuid4(),
+        project_id=anchor.project_id,
+        framework=anchor.framework,
+        language=anchor.language,
+        filename=anchor.filename,
+        code=new_code,
+        mode=anchor.mode,
+        url=anchor.url,
+        llm_model=anchor.llm_model,
+        source_scenarios_hash=anchor.source_scenarios_hash,
+        source_scenario_ids=anchor.source_scenario_ids,
+        source_scenario_count=anchor.source_scenario_count,
+        version=next_version,
+        is_active=True,
+        selected_for_run=False,
+    )
+    db.add(new_row)
+    await db.commit()
+    await db.refresh(new_row)
+
+    current_hash = await _current_combined_hash(db, str(new_row.project_id), new_row.url)
+    return _suite_out(new_row, current_hash)
+
+
+@router.post("/code/suites/{suite_id}/restore", response_model=TestSuiteOut)
+async def restore_suite_version(
+    suite_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Restore an old version by copying its code into a brand-new head row
+    (version = max+1). The historical row is left in place; the prior head
+    is deactivated. This keeps history strictly append-only.
+    """
+    anchor_q = await db.execute(select(TestSuite).where(TestSuite.id == suite_id))
+    anchor = anchor_q.scalar_one_or_none()
+    if not anchor:
+        raise HTTPException(status_code=404, detail="Test suite not found")
+
+    await db.execute(
+        update(TestSuite)
+        .where(
+            TestSuite.project_id == anchor.project_id,
+            TestSuite.framework == anchor.framework,
+            TestSuite.is_active == True,  # noqa: E712
+        )
+        .values(is_active=False, selected_for_run=False)
+    )
+
+    next_version_q = await db.execute(
+        select(sa_func.coalesce(sa_func.max(TestSuite.version), 0)).where(
+            TestSuite.project_id == anchor.project_id,
+            TestSuite.framework == anchor.framework,
+        )
+    )
+    next_version = int(next_version_q.scalar() or 0) + 1
+
+    restored = TestSuite(
+        id=uuid.uuid4(),
+        project_id=anchor.project_id,
+        framework=anchor.framework,
+        language=anchor.language,
+        filename=anchor.filename,
+        code=anchor.code,
+        mode=anchor.mode,
+        url=anchor.url,
+        llm_model=anchor.llm_model,
+        source_scenarios_hash=anchor.source_scenarios_hash,
+        source_scenario_ids=anchor.source_scenario_ids,
+        source_scenario_count=anchor.source_scenario_count,
+        version=next_version,
+        is_active=True,
+        selected_for_run=False,
+    )
+    db.add(restored)
+    await db.commit()
+    await db.refresh(restored)
+
+    current_hash = await _current_combined_hash(db, str(restored.project_id), restored.url)
+    return _suite_out(restored, current_hash)
+
+
+@router.post("/code/suites/{suite_id}/select-for-run", response_model=TestSuiteOut)
+async def select_suite_for_run(
+    suite_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Mark this suite as the one CI/CD should execute. Only one suite per
+    project carries the flag — selecting a new one clears every other suite
+    in the same project. Only the active head of a framework chain can be
+    selected (older versions must be restored first).
+    """
+    anchor_q = await db.execute(select(TestSuite).where(TestSuite.id == suite_id))
+    anchor = anchor_q.scalar_one_or_none()
+    if not anchor:
+        raise HTTPException(status_code=404, detail="Test suite not found")
+    if not anchor.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Only the active version of a framework can be selected for a run.",
+        )
+
+    # Clear every other suite in the project first, then mark this one.
+    await db.execute(
+        update(TestSuite)
+        .where(
+            TestSuite.project_id == anchor.project_id,
+            TestSuite.id != anchor.id,
+        )
+        .values(selected_for_run=False)
+    )
+    anchor.selected_for_run = True
+    db.add(anchor)
+    await db.commit()
+    await db.refresh(anchor)
+
+    current_hash = await _current_combined_hash(db, str(anchor.project_id), anchor.url)
+    return _suite_out(anchor, current_hash)
 
 
 # ─── DOM crawler endpoints ────────────────────────────────────────────────────

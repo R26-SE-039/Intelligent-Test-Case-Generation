@@ -101,7 +101,19 @@ class GherkinScenario(Base):
 class TestSuite(Base):
     """
     Persisted test code generated from approved Gherkin scenarios.
-    One row per (project_id, framework) — regeneration upserts.
+
+    History model — each (project, framework) is a chain of versions:
+      - `version` is a 1-based incrementing counter per (project, framework).
+      - `is_active=True` marks the head of the chain (the latest version that
+        autosaves apply to; appears in the Code Review list).
+      - `selected_for_run=True` marks the one suite (across the whole project)
+        that the next CI/CD run should execute. At most one row per project
+        carries this flag.
+
+    Regeneration INSERTs a fresh row at version+1, flips the prior head to
+    inactive. QA edits autosave into the active row. "Save as new version"
+    snapshots the active row. "Restore" copies an old version's code into a
+    new head row, so history is never destructive.
 
     source_scenarios_hash fingerprints the Gherkin inputs that produced this
     suite, so the UI can detect when scenarios have drifted and prompt the
@@ -110,7 +122,10 @@ class TestSuite(Base):
     """
     __tablename__ = "test_suites"
     __table_args__ = (
-        UniqueConstraint("project_id", "framework", name="uq_test_suites_project_framework"),
+        UniqueConstraint(
+            "project_id", "framework", "version",
+            name="uq_test_suites_project_framework_version",
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -129,6 +144,9 @@ class TestSuite(Base):
     source_scenarios_hash = Column(String(64), nullable=False)
     source_scenario_ids = Column(JSONB, nullable=False, default=list)
     source_scenario_count = Column(Integer, nullable=False, default=0)
+    version = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, nullable=False, default=True)
+    selected_for_run = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -198,3 +216,81 @@ class TestRun(Base):
     duration_ms = Column(Integer, nullable=True)
     error_message = Column(Text, nullable=True)
     executed_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class TestRunExecution(Base):
+    """
+    One row per "Run Tests" click — captures the whole CI/CD execution.
+
+    Two execution paths share this schema:
+      - `mode='github'`  → GitHub Actions workflow_dispatch was triggered.
+        `github_run_id` and `github_run_url` link out to the live run.
+      - `mode='local'`   → A subprocess Playwright run on the FastAPI host.
+        Used as the demo-safe fallback when GITHUB_TOKEN is not configured.
+
+    `raw_log_text` is the full stdout/stderr capture (or GitHub Actions log
+    fetched via REST after the run finished) — this is the "log file saved
+    in DB" deliverable. Per-scenario rows still land in `test_runs` so the
+    ML risk model keeps its training signal.
+
+    `artifacts_json` stores the structured screenshot / video / Allure links
+    so we don't need a JOIN to render the dashboard.
+    """
+    __tablename__ = "test_run_executions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    suite_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("test_suites.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    framework = Column(String(40), nullable=False)
+    mode = Column(String(20), nullable=False)            # github | local
+    status = Column(String(20), nullable=False, default="queued")
+                                                          # queued | running | passed | failed | error
+    github_run_id = Column(String(64), nullable=True)    # numeric ID returned by GH API
+    github_run_url = Column(Text, nullable=True)         # https://github.com/owner/repo/actions/runs/...
+    github_branch = Column(String(120), nullable=True)   # runs/{uuid}
+
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+
+    total_count = Column(Integer, nullable=False, default=0)
+    passed_count = Column(Integer, nullable=False, default=0)
+    failed_count = Column(Integer, nullable=False, default=0)
+
+    raw_log_text = Column(Text, nullable=True)            # full execution log captured at run end
+    artifacts_json = Column(JSONB, nullable=False, default=dict)
+                                                          # {screenshots, video, allure_url, ...}
+    pdf_path = Column(Text, nullable=True)                # local filesystem path to generated PDF
+    error_message = Column(Text, nullable=True)
+
+
+class TestRunScreenshot(Base):
+    """
+    Per-scenario screenshot persisted to disk and indexed in the DB so the
+    dashboard's screenshot grid can be rendered with a single query. The
+    image bytes live under `./reports/{run_id}/screenshots/`; `image_path`
+    is the relative path served via the static-file endpoint.
+    """
+    __tablename__ = "test_run_screenshots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("test_run_executions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    scenario = Column(String(255), nullable=False)
+    label = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False)            # passed | failed
+    image_path = Column(Text, nullable=False)              # relative path under ./reports/
+    captured_at = Column(DateTime(timezone=True), server_default=func.now())
