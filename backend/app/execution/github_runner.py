@@ -46,6 +46,11 @@ class GitHubConfig:
 
     @classmethod
     def from_env(cls) -> Optional["GitHubConfig"]:
+        """
+        Legacy fallback — reads from env vars. Kept so existing dev setups
+        (and CI smoke tests) keep working, but the canonical source is now
+        the per-project DB row populated via Settings → GitHub Connect.
+        """
         token = os.getenv("GITHUB_TOKEN", "").strip()
         repo_full = os.getenv("GITHUB_REPO", "").strip()
         if not token or "/" not in repo_full:
@@ -56,6 +61,26 @@ class GitHubConfig:
             owner=owner,
             repo=repo,
             base_branch=os.getenv("GITHUB_BASE_BRANCH", "main"),
+        )
+
+    @classmethod
+    async def from_project(cls, project_id: str) -> Optional["GitHubConfig"]:
+        """
+        Preferred constructor — looks up the project's saved connection
+        and decrypts the token. Returns None if the project hasn't been
+        connected from the dashboard.
+        """
+        # Local import to avoid a circular dependency at module load.
+        from app.github_connection import load_connection
+
+        record = await load_connection(project_id)
+        if record is None:
+            return None
+        return cls(
+            token=record.token,
+            owner=record.owner,
+            repo=record.repo,
+            base_branch=record.default_branch,
         )
 
     @property

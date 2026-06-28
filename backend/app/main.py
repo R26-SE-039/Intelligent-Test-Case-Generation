@@ -22,6 +22,7 @@ from app.agent_explorer import agent_broker
 from app.agent_explorer.routes import router as agent_router, register_agent_websocket
 from app.execution import log_broker as execution_log_broker
 from app.execution.routes import router as execution_router, register_execution_websocket
+from app.github_connection.routes import router as github_connection_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(agent_router)
 app.include_router(execution_router)
+app.include_router(github_connection_router)
 register_agent_websocket(app)
 register_execution_websocket(app)
 

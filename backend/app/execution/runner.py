@@ -52,11 +52,17 @@ def _flow_name_for(scenario: str) -> str:
     return "other"
 
 
-def detect_mode(force: Optional[str] = None) -> str:
-    """Pick 'github' if a token is configured, else 'local'. `force` wins
-    when the caller wants to override (e.g. demo mode)."""
+async def detect_mode(project_id: str, force: Optional[str] = None) -> str:
+    """
+    Pick 'github' if the project has a saved connection (or the legacy
+    GITHUB_TOKEN env var is set), else 'local'. `force` wins when the
+    caller wants to override the auto-detection (e.g. demo mode).
+    """
     if force in ("github", "local"):
         return force
+    project_cfg = await GitHubConfig.from_project(project_id)
+    if project_cfg is not None:
+        return "github"
     return "github" if GitHubConfig.from_env() else "local"
 
 
@@ -82,7 +88,7 @@ async def start_run(
             log_broker.close(run_id)
             raise ValueError("Suite not found")
 
-        mode = detect_mode(force_mode)
+        mode = await detect_mode(project_id, force_mode)
         row = TestRunExecution(
             id=uuid.UUID(run_id),
             project_id=project_id,
@@ -172,7 +178,11 @@ async def _run_via_github(
     row: TestRunExecution,
     suite: TestSuite,
 ) -> None:
-    cfg = GitHubConfig.from_env()
+    # Prefer the per-project connection saved via Settings → GitHub Connect.
+    # Fall back to the legacy GITHUB_TOKEN env if that's the only thing set.
+    cfg = await GitHubConfig.from_project(str(row.project_id))
+    if cfg is None:
+        cfg = GitHubConfig.from_env()
     assert cfg is not None  # detect_mode guarantees this when mode='github'
 
     try:

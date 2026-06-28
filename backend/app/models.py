@@ -294,3 +294,37 @@ class TestRunScreenshot(Base):
     status = Column(String(20), nullable=False)            # passed | failed
     image_path = Column(Text, nullable=False)              # relative path under ./reports/
     captured_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProjectGitHubConnection(Base):
+    """
+    Per-project GitHub credential + target repo. One row per project (PK is
+    project_id) so users can wire different projects to different repos.
+
+    The token is encrypted at rest with Fernet (symmetric AES-128-CBC + HMAC)
+    using a key from NEXTGENQA_CRYPTO_KEY in .env. We never return the
+    decrypted token to the frontend — the dashboard shows a masked preview.
+
+    `workflow_installed_at` is stamped after we successfully PUT the workflow
+    YAML to the repo's default branch. If null, the connection exists but
+    the workflow is missing (e.g. install failed; UI offers a "Reinstall"
+    button).
+    """
+    __tablename__ = "project_github_connections"
+
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    encrypted_token = Column(Text, nullable=False)        # Fernet ciphertext
+    token_preview = Column(String(20), nullable=False)    # e.g. "ghp_****wxyz"
+    owner = Column(String(120), nullable=False)
+    repo = Column(String(120), nullable=False)
+    default_branch = Column(String(120), nullable=False, default="main")
+    github_user_login = Column(String(120), nullable=True)
+    github_user_avatar_url = Column(Text, nullable=True)
+    workflow_installed_at = Column(DateTime(timezone=True), nullable=True)
+    last_validated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

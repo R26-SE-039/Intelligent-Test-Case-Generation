@@ -497,6 +497,113 @@ export async function getRiskPredictions(projectId: string): Promise<RiskRespons
   return request<RiskResponse>(`/api/v1/projects/${projectId}/risk`);
 }
 
+// ─── GitHub Connection API ───────────────────────────────────────────────────
+
+export interface GitHubRepo {
+  full_name: string;
+  name: string;
+  owner: string;
+  default_branch: string;
+  private: boolean;
+  html_url: string;
+}
+
+export interface GitHubValidateResponse {
+  login: string;
+  name?: string | null;
+  avatar_url?: string | null;
+  repos: GitHubRepo[];
+  repo_count: number;
+}
+
+export interface GitHubConnection {
+  project_id: string;
+  owner: string;
+  repo: string;
+  repo_full: string;
+  default_branch: string;
+  token_preview: string;
+  github_user_login?: string | null;
+  github_user_avatar_url?: string | null;
+  workflow_installed: boolean;
+  workflow_installed_at?: string | null;
+  last_validated_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface GitHubConnectResponse {
+  connection: GitHubConnection;
+  workflow_status: "installed" | "already_present" | "conflict";
+  workflow_message: string;
+}
+
+export interface GitHubPingResponse {
+  ok: boolean;
+  login?: string | null;
+  rate_limit_remaining?: number | null;
+  workflow_present: boolean;
+  detail?: string | null;
+}
+
+/** Validate a PAT — returns user identity + a list of repos they can push to. */
+export async function validateGitHubToken(token: string): Promise<GitHubValidateResponse> {
+  return request<GitHubValidateResponse>("/api/v1/github/validate", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+/** Get the current connection for a project, or null if not configured. */
+export async function getGitHubConnection(projectId: string): Promise<GitHubConnection | null> {
+  return request<GitHubConnection | null>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/github/connection`,
+  );
+}
+
+/** Persist token + repo and install the workflow. */
+export async function connectGitHub(
+  projectId: string,
+  body: {
+    token: string;
+    owner: string;
+    repo: string;
+    default_branch?: string;
+    force_workflow_overwrite?: boolean;
+  },
+): Promise<GitHubConnectResponse> {
+  return request<GitHubConnectResponse>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/github/connect`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+/** Force-reinstall the workflow file (use after a 'conflict' response). */
+export async function reinstallGitHubWorkflow(projectId: string): Promise<GitHubConnectResponse> {
+  return request<GitHubConnectResponse>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/github/reinstall-workflow`,
+    { method: "POST" },
+  );
+}
+
+/** Smoke-test the stored connection: token still valid? workflow still present? */
+export async function pingGitHubConnection(projectId: string): Promise<GitHubPingResponse> {
+  return request<GitHubPingResponse>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/github/test-ping`,
+    { method: "POST" },
+  );
+}
+
+/** Remove the connection (leaves the workflow file on the repo intact). */
+export async function disconnectGitHub(projectId: string): Promise<void> {
+  return request<void>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/github/connection`,
+    { method: "DELETE" },
+  );
+}
+
 // ─── Execution & Report API ──────────────────────────────────────────────────
 
 export interface ExecuteResponse {

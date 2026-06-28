@@ -14,6 +14,7 @@ import {
   FolderOpen,
   Search,
   Sparkles,
+  Plug,
 } from "lucide-react";
 import { useSidebar } from "@/lib/sidebar-context";
 import { useProject } from "@/lib/project-context";
@@ -67,6 +68,12 @@ const navItems: NavItem[] = [
     icon: <Sparkles className="w-5 h-5" />,
     href: "/dashboard/agent-explorer",
     step: "AI",
+  },
+  {
+    label: "GitHub Connect",
+    icon: <Plug className="w-5 h-5" />,
+    href: "/dashboard/settings/github",
+    step: "GH",
   },
 ];
 
