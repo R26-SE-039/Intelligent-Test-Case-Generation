@@ -679,6 +679,18 @@ export async function executeSuite(params: {
   });
 }
 
+/**
+ * Re-run a previous GitHub Actions run via the official rerun API. The
+ * returned `run_id` is a NEW TestRunExecution row tracking the new attempt
+ * — subscribe to its WS stream just like a normal run.
+ */
+export async function rerunRun(prevRunId: string): Promise<ExecuteResponse> {
+  return request<ExecuteResponse>(
+    `/api/v1/runs/${encodeURIComponent(prevRunId)}/rerun`,
+    { method: "POST", timeoutMs: 60_000 },
+  );
+}
+
 /** List recent runs for a project (newest first). */
 export async function listRuns(projectId: string, limit = 20): Promise<RunSummary[]> {
   return request<RunSummary[]>(

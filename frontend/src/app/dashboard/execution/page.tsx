@@ -10,13 +10,13 @@ import {
   CheckCircle,
   ChevronLeft,
   Clock,
-  Download,
   ExternalLink,
   GitBranch,
   Image as ImageIcon,
   Loader2,
   MinusCircle,
   Plug,
+  RotateCcw,
   Server,
   Terminal,
   XCircle,
@@ -28,8 +28,8 @@ import {
   getRun,
   getTestSuites,
   openExecutionStream,
+  rerunRun,
   runLatestFrameUrl,
-  runLogUrl,
   type ExecutionEvent,
   type GitHubConnection,
   type RunDetail,
@@ -206,8 +206,11 @@ function ExecutionContent() {
         />
       </div>
 
-      {/* Summary strip BELOW the two panels */}
-      <SummaryStrip local={localSummary} github={githubSummary} />
+      {/* Stats now live inline INSIDE each RunnerPanel (the user asked for
+          the "summary below" to go away). What remains below is just the
+          screenshot grids — and even those only render when there's
+          actually something captured. */}
+      <ScreenshotsStrip local={localSummary} github={githubSummary} />
     </DashboardLayoutWrapper>
   );
 }
@@ -244,6 +247,12 @@ function RunnerPanel({ mode, suite, projectId, ghConnection, ghLoading, onSummar
   const logRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const livePollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // runIdRef mirrors `runId` synchronously so the WebSocket onmessage
+  // closure (captured at openExecutionStream time) can always read the
+  // latest id. Using the state directly causes a stale-closure bug where
+  // the 'done' event arrives with runId === null and skips fetchRunDetail,
+  // leaving the inline summary stuck at "NO RUN YET" after a real run.
+  const runIdRef = useRef<string | null>(null);
 
   // Bubble summary up whenever the local detail changes.
   useEffect(() => { onSummary(runDetail); }, [runDetail, onSummary]);
@@ -319,12 +328,16 @@ function RunnerPanel({ mode, suite, projectId, ghConnection, ghLoading, onSummar
     } else if (evt.type === "done") {
       const final = evt.status === "passed" ? "passed" : evt.status === "failed" ? "failed" : "error";
       setStatus(final);
-      if (runId) void fetchRunDetail(runId);
+      // Read from runIdRef (synchronously up to date) — runId from
+      // closure here is stale because the WS captured this callback
+      // before setRunId committed.
+      const id = runIdRef.current;
+      if (id) void fetchRunDetail(id);
     } else if (evt.type === "error") {
       setStatus("error");
       setError(evt.message);
     }
-  }, [runId, fetchRunDetail]);
+  }, [fetchRunDetail]);
 
   const startRun = useCallback(async () => {
     if (!suite || !projectId) return;
@@ -345,6 +358,7 @@ function RunnerPanel({ mode, suite, projectId, ghConnection, ghLoading, onSummar
         projectId,
         mode,                                  // force THIS panel's mode
       });
+      runIdRef.current = resp.run_id;          // sync ref BEFORE the WS opens
       setRunId(resp.run_id);
       setStatus("running");
       wsRef.current?.close();
@@ -364,8 +378,36 @@ function RunnerPanel({ mode, suite, projectId, ghConnection, ghLoading, onSummar
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runTriggerKey]);
 
+  // GitHub Actions only: hit the official rerun endpoint on the previous
+  // run's gh_run_id. Faster than startRun() — no branch creation, no file
+  // push, no workflow_dispatch round-trip. Tracked as a fresh DB row.
+  const rerunPrevious = useCallback(async () => {
+    if (mode !== "github") return;
+    if (!runId || !runDetail?.github_run_id) return;
+    const prevId = runId;
+    setLogs([]);
+    setRunDetail(null);
+    setPdfReady(false);
+    setError(null);
+    setLivePreviewSrc(null);
+    setLivePreviewLoaded(false);
+    setStatus("queued");
+    try {
+      const resp = await rerunRun(prevId);
+      runIdRef.current = resp.run_id;
+      setRunId(resp.run_id);
+      setStatus("running");
+      wsRef.current?.close();
+      wsRef.current = openExecutionStream(resp.run_id, handleEvent);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Re-run failed");
+      setStatus("error");
+    }
+  }, [mode, runId, runDetail, handleEvent]);
+
   const resetRun = () => {
     wsRef.current?.close();
+    runIdRef.current = null;
     setRunId(null);
     setLogs([]);
     setStatus("idle");
@@ -417,6 +459,20 @@ function RunnerPanel({ mode, suite, projectId, ghConnection, ghLoading, onSummar
               className="text-[11px] px-2 py-1 rounded bg-white/15 hover:bg-white/25 transition-all"
             >
               Reset
+            </button>
+          )}
+          {/* Re-run: GitHub only, visible after a prior GH run completes
+              for this panel. Calls /runs/{id}/rerun which uses GitHub's
+              official rerun API — much faster than a fresh dispatch. */}
+          {mode === "github" && isDone && runDetail?.github_run_id && (
+            <button
+              onClick={rerunPrevious}
+              disabled={isBusy}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white text-xs font-semibold rounded-md transition-all disabled:opacity-40"
+              title="Re-run via GitHub's official rerun API (faster — reuses the same branch + commit)"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Re-run
             </button>
           )}
           <button
@@ -499,6 +555,16 @@ function RunnerPanel({ mode, suite, projectId, ghConnection, ghLoading, onSummar
                   stream below.
                 </span>
               </div>
+            </div>
+          )}
+
+          {/* Inline run summary — sits BETWEEN the preview/info note and
+              the log so the user sees stats right where the panel lives,
+              not in a separate strip below. Only renders after a run
+              actually completes for this panel. */}
+          {isDone && runDetail && (
+            <div className="mx-3 mt-2">
+              <InlineSummary detail={runDetail} accentColor={mode === "local" ? "emerald" : "purple"} />
             </div>
           )}
 
@@ -612,51 +678,21 @@ function LiveBrowserPreview({ src, status, loaded, onLoad, mode }: LiveBrowserPr
   );
 }
 
-// ─── Summary strip — sits below the two panels ──────────────────────────────
+// ─── Inline summary — rendered INSIDE each RunnerPanel after its run ────────
 
-interface SummaryStripProps {
-  local: RunDetail | null;
-  github: RunDetail | null;
+interface InlineSummaryProps {
+  detail: RunDetail;
+  accentColor: "emerald" | "purple";
 }
 
-function SummaryStrip({ local, github }: SummaryStripProps) {
-  const anyDone = local || github;
-  return (
-    <div className="px-6 py-5 grid grid-cols-2 gap-5">
-      <SummaryCard mode="local" detail={local} />
-      <SummaryCard mode="github" detail={github} />
-
-      {/* Per-side screenshots underneath the cards. We render the failed
-          run's screenshots first if any, otherwise the most-recent one. */}
-      {anyDone && (
-        <div className="col-span-2 grid grid-cols-2 gap-5">
-          {local && <ScreenshotGrid title="Local screenshots" screenshots={local.screenshots} />}
-          {github && <ScreenshotGrid title="GitHub Actions screenshots" screenshots={github.screenshots} />}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SummaryCard({ mode, detail }: { mode: RunMode; detail: RunDetail | null }) {
-  const accent =
-    mode === "local"
-      ? { name: "Local Playwright", icon: <Server className="w-4 h-4 text-emerald-600" />, border: "border-emerald-200" }
-      : { name: "GitHub Actions",  icon: <GitBranch className="w-4 h-4 text-purple-600" />, border: "border-purple-200" };
-
-  if (!detail) {
-    return (
-      <div className={`rounded-xl border ${accent.border} bg-white p-5`}>
-        <div className="flex items-center gap-2 mb-3">
-          {accent.icon}
-          <p className="text-sm font-bold text-slate-900">{accent.name}</p>
-          <span className="text-[10px] uppercase tracking-widest text-slate-400 ml-auto">no run yet</span>
-        </div>
-        <p className="text-xs text-slate-500">Run this side to populate stats here.</p>
-      </div>
-    );
-  }
-
+/**
+ * Compact stats panel that lives directly under the live preview / info note
+ * inside a RunnerPanel. Replaces the bigger "summary card below" so the user
+ * never sees an empty "NO RUN YET" placeholder for a side that just ran.
+ *
+ * No download buttons — the user explicitly asked for stats only.
+ */
+function InlineSummary({ detail, accentColor }: InlineSummaryProps) {
   const total = Math.max(detail.total_count, 1);
   const successRate = Math.round((detail.passed_count / total) * 100);
   const chartData = [
@@ -664,80 +700,87 @@ function SummaryCard({ mode, detail }: { mode: RunMode; detail: RunDetail | null
     { name: "Failed", value: detail.failed_count, color: "#ef4444" },
   ].filter((d) => d.value > 0);
 
+  const borderClass = accentColor === "emerald" ? "border-emerald-200" : "border-purple-200";
+
   return (
-    <div className={`rounded-xl border ${accent.border} bg-white p-5`}>
-      <div className="flex items-center gap-2 mb-4">
-        {accent.icon}
-        <p className="text-sm font-bold text-slate-900">{accent.name}</p>
-        <span className={`text-[10px] font-bold uppercase tracking-widest ml-auto ${statusColor(detail.status)}`}>
+    <div className={`rounded-lg border ${borderClass} bg-white p-3`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+          Run Summary
+        </span>
+        <span className={`text-[10px] font-bold uppercase tracking-wider ${statusColor(detail.status)}`}>
           {detail.status}
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        {/* Stats column */}
-        <div className="space-y-2 text-sm">
-          {[
-            { label: "Total Tests",  value: String(detail.total_count),   color: "text-slate-900" },
-            { label: "Passed",       value: String(detail.passed_count),  color: "text-emerald-700" },
-            { label: "Failed",       value: String(detail.failed_count),  color: "text-red-700" },
-            { label: "Success Rate", value: `${successRate}%`,            color: "text-purple-700" },
-            { label: "Duration",     value: detail.duration_ms ? `${(detail.duration_ms / 1000).toFixed(1)}s` : "—", color: "text-slate-700" },
-            { label: "Framework",    value: detail.framework,             color: "text-emerald-700" },
-          ].map((s) => (
-            <div key={s.label} className="flex items-center justify-between">
-              <span className="text-xs text-slate-500">{s.label}</span>
-              <span className={`text-sm font-bold ${s.color}`}>{s.value}</span>
-            </div>
-          ))}
+      <div className="grid grid-cols-5 gap-2 items-center">
+        {/* Stat tiles — 4 columns wide, donut on the right */}
+        <div className="col-span-4 grid grid-cols-4 gap-2">
+          <StatTile label="Total"    value={String(detail.total_count)}   tone="text-slate-900" />
+          <StatTile label="Passed"   value={String(detail.passed_count)}  tone="text-emerald-700" />
+          <StatTile label="Failed"   value={String(detail.failed_count)}  tone="text-red-700" />
+          <StatTile label="Success"  value={`${successRate}%`}            tone="text-purple-700" />
+          <StatTile label="Duration" value={detail.duration_ms ? `${(detail.duration_ms / 1000).toFixed(1)}s` : "—"} tone="text-slate-700" />
+          <StatTile label="Framework" value={detail.framework}            tone="text-slate-700" />
         </div>
 
-        {/* Chart column */}
-        <div className="flex flex-col items-center">
+        {/* Donut on the right */}
+        <div className="col-span-1 h-20">
           {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={140}>
+            <ResponsiveContainer width="100%" height={80}>
               <PieChart>
                 <Pie
                   data={chartData}
                   cx="50%" cy="50%"
-                  innerRadius={36} outerRadius={58}
-                  paddingAngle={3} dataKey="value"
+                  innerRadius={22} outerRadius={36}
+                  paddingAngle={2} dataKey="value"
                 >
                   {chartData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                 </Pie>
-                <Tooltip
-                  contentStyle={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 8 }}
-                  itemStyle={{ color: "#0f172a" }}
-                />
               </PieChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-xs text-slate-400 italic py-10">No counts captured</p>
+            <div className="h-full flex items-center justify-center text-[10px] text-slate-400">no counts</div>
           )}
         </div>
       </div>
 
-      {/* Download row — log only. The PDF still gets generated server-side
-          and lives at run.pdf_path in the DB; we just don't expose it from
-          this card. Add it back via `runPdfUrl(detail.id)` if needed. */}
-      <div className="mt-4">
-        <a
-          href={runLogUrl(detail.id)}
-          target="_blank"
-          rel="noreferrer"
-          className="w-full flex items-center justify-center gap-2 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-md transition-all shadow-sm"
-        >
-          <Download className="w-3.5 h-3.5" />
-          Download Raw Log (saved in DB)
-        </a>
-      </div>
-
       {detail.failed_count > 0 && (
-        <div className="mt-3 p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800 flex items-start gap-1.5">
+        <div className="mt-2 px-2 py-1.5 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 flex items-start gap-1.5">
           <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
-          <span>{detail.failed_count} scenario{detail.failed_count === 1 ? "" : "s"} failed — see the raw log for full traces.</span>
+          <span>
+            {detail.failed_count} failure{detail.failed_count === 1 ? "" : "s"} — full traces in the live log above.
+          </span>
         </div>
       )}
+    </div>
+  );
+}
+
+function StatTile({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return (
+    <div className="bg-slate-50 border border-slate-200 rounded px-2 py-1.5">
+      <p className="text-[9px] uppercase tracking-widest text-slate-500">{label}</p>
+      <p className={`text-sm font-bold ${tone} truncate`}>{value}</p>
+    </div>
+  );
+}
+
+// ─── Bottom section: per-side captured screenshot grids ─────────────────────
+
+interface ScreenshotsStripProps {
+  local: RunDetail | null;
+  github: RunDetail | null;
+}
+
+function ScreenshotsStrip({ local, github }: ScreenshotsStripProps) {
+  const localShots = local?.screenshots ?? [];
+  const githubShots = github?.screenshots ?? [];
+  if (localShots.length === 0 && githubShots.length === 0) return null;
+  return (
+    <div className="px-6 py-5 grid grid-cols-2 gap-5">
+      {localShots.length > 0 && <ScreenshotGrid title="Local screenshots" screenshots={localShots} />}
+      {githubShots.length > 0 && <ScreenshotGrid title="GitHub Actions screenshots" screenshots={githubShots} />}
     </div>
   );
 }

@@ -330,26 +330,66 @@ export default function GitHubConnectPage() {
               </Link>
             </div>
 
-            {pingResult && (
-              <div className={`mt-3 p-2.5 rounded-md text-xs border ${
-                pingResult.ok
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                  : "border-red-200 bg-red-50 text-red-700"
-              }`}>
-                {pingResult.ok ? (
-                  <>
-                    OK — authenticated as <strong>@{pingResult.login}</strong>
-                    {pingResult.rate_limit_remaining != null && (
-                      <> · rate-limit remaining: {pingResult.rate_limit_remaining}</>
-                    )}
-                    <> · workflow {pingResult.workflow_present ? "present" : "MISSING"}</>
-                    {pingResult.detail && <div className="mt-1 text-amber-700">{pingResult.detail}</div>}
-                  </>
-                ) : (
-                  pingResult.detail || "Connection check failed"
-                )}
-              </div>
-            )}
+            {pingResult && (() => {
+              const detail = pingResult.detail ?? "";
+              // The backend returns "Token decryption failed..." when the
+              // stored ciphertext can't be unsealed with the current Fernet
+              // key — usually because NEXTGENQA_CRYPTO_KEY changed (or was
+              // ephemeral before .env was set). The only recovery is to
+              // delete this row and reconnect with a fresh token.
+              const isDecryptionError = !pingResult.ok && /decrypt/i.test(detail);
+
+              if (isDecryptionError) {
+                return (
+                  <div className="mt-3 p-3 rounded-md border border-red-300 bg-red-50 text-xs space-y-2">
+                    <div className="flex items-start gap-2 text-red-700">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold mb-0.5">Token can no longer be decrypted</p>
+                        <p>{detail}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleDisconnect}
+                      disabled={disconnecting}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold rounded-md transition-all"
+                    >
+                      {disconnecting ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="w-3.5 h-3.5" />
+                      )}
+                      Reset connection (delete the unreadable record)
+                    </button>
+                    <p className="text-[11px] text-slate-500 text-center">
+                      After resetting, paste a fresh PAT in the form below to reconnect. The
+                      workflow file on the repo stays in place.
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className={`mt-3 p-2.5 rounded-md text-xs border ${
+                  pingResult.ok
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-red-200 bg-red-50 text-red-700"
+                }`}>
+                  {pingResult.ok ? (
+                    <>
+                      OK — authenticated as <strong>@{pingResult.login}</strong>
+                      {pingResult.rate_limit_remaining != null && (
+                        <> · rate-limit remaining: {pingResult.rate_limit_remaining}</>
+                      )}
+                      <> · workflow {pingResult.workflow_present ? "present" : "MISSING"}</>
+                      {pingResult.detail && <div className="mt-1 text-amber-700">{pingResult.detail}</div>}
+                    </>
+                  ) : (
+                    detail || "Connection check failed"
+                  )}
+                </div>
+              );
+            })()}
           </div>
         ) : null}
 

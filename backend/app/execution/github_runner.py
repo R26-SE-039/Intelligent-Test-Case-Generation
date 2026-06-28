@@ -204,6 +204,44 @@ async def trigger_run(
         )
 
 
+async def rerun_workflow_run(
+    cfg: GitHubConfig,
+    gh_run_id: str,
+) -> GitHubTriggerResult:
+    """
+    Trigger a re-run of an existing GitHub Actions workflow run via
+    POST /actions/runs/{id}/rerun. Faster than `trigger_run` because we
+    don't create a new branch or push files — GitHub reuses the same
+    commit/inputs and increments the run_attempt counter.
+
+    The returned `run_id_github` is the SAME as the input; subsequent polls
+    of /jobs and /logs against that id will reflect the new attempt.
+    """
+    async with httpx.AsyncClient(headers=cfg.headers, timeout=30.0) as client:
+        rerun = await client.post(
+            f"{GITHUB_API_BASE}/repos/{cfg.owner}/{cfg.repo}/actions/runs/{gh_run_id}/rerun"
+        )
+        if rerun.status_code not in (201, 204):
+            raise RuntimeError(
+                f"GitHub rerun returned HTTP {rerun.status_code}: "
+                f"{rerun.text[:200]}. The run may be too old to re-run "
+                f"(GitHub retains run history for ~90 days), or your token "
+                f"may lack the actions:write scope."
+            )
+
+        # Look up the run URL + branch for the dashboard.
+        meta = await client.get(
+            f"{GITHUB_API_BASE}/repos/{cfg.owner}/{cfg.repo}/actions/runs/{gh_run_id}"
+        )
+        meta.raise_for_status()
+        data = meta.json()
+        return GitHubTriggerResult(
+            run_id_github=str(gh_run_id),
+            run_url=data.get("html_url", ""),
+            branch=data.get("head_branch", ""),
+        )
+
+
 async def stream_run_progress(
     cfg: GitHubConfig,
     gh_run_id: str,
@@ -238,13 +276,22 @@ async def stream_run_progress(
                 for step in job.get("steps", []):
                     key = (job["name"], step["name"])
                     state = step.get("status")     # queued | in_progress | completed
-                    res = step.get("conclusion")   # success | failure | None
+                    res = step.get("conclusion")   # success | failure | skipped | cancelled | neutral | None
                     if state == "completed" and key not in seen:
                         seen.add(key)
-                        on_step({
-                            "step": step["name"],
-                            "status": "passed" if res == "success" else "failed" if res else "info",
-                        })
+                        # Map GitHub's conclusion vocab to our UI status set.
+                        # Crucially: skipped/cancelled are NOT failures — they
+                        # ran an `if:` gate that didn't match, or were halted
+                        # by a prior failure. Rendering them red was wrong.
+                        if res == "success":
+                            ui_status = "passed"
+                        elif res == "failure":
+                            ui_status = "failed"
+                        elif res in ("skipped", "cancelled", "neutral"):
+                            ui_status = "skipped"
+                        else:
+                            ui_status = "info"
+                        on_step({"step": step["name"], "status": ui_status})
                     elif state == "in_progress" and (key, "running") not in seen:
                         seen.add((key, "running"))
                         on_step({"step": step["name"], "status": "running"})
