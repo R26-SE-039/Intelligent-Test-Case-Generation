@@ -44,6 +44,9 @@ router = APIRouter(prefix="/api/v1", tags=["pipeline"])
 class ProjectIn(BaseModel):
     name: str
     description: Optional[str] = None
+    # Optional client-supplied UUID. The merged NextGenQA frontend passes the
+    # auth-service project id here so both services share one project id.
+    id: Optional[uuid.UUID] = None
 
 
 class ProjectOut(BaseModel):
@@ -138,14 +141,34 @@ def _gherkin_out(g: GherkinScenario) -> GherkinOut:
 
 @router.post("/projects", response_model=ProjectOut)
 async def create_project(body: ProjectIn, db: AsyncSession = Depends(get_db)):
-    """Create a new project (blank workspace)."""
+    """Create a new project (blank workspace).
+
+    When `id` is supplied the call is a get-or-create: an existing project with
+    that id is returned as-is, so external services (the auth service) can keep
+    a single shared project id without a mapping table.
+    """
+    if body.id is not None:
+        existing = await db.get(Project, body.id)
+        if existing:
+            return ProjectOut(
+                id=str(existing.id),
+                name=existing.name,
+                description=existing.description,
+                created_at=existing.created_at.isoformat() if existing.created_at else None,
+            )
+
     # Check name uniqueness
     result = await db.execute(select(Project).where(Project.name == body.name))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail=f"Project '{body.name}' already exists")
+    conflicting = result.scalar_one_or_none()
+    if conflicting is not None:
+        if body.id is None:
+            raise HTTPException(status_code=409, detail=f"Project '{body.name}' already exists")
+        # id is the real key for bridged projects — dedupe the display name
+        # instead of failing so get-or-create stays idempotent.
+        body.name = f"{body.name} ({str(body.id)[:8]})"
 
     project = Project(
-        id=uuid.uuid4(),
+        id=body.id or uuid.uuid4(),
         name=body.name,
         description=body.description,
     )
