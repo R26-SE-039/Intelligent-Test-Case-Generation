@@ -1,6 +1,6 @@
 .PHONY: up down logs restart build dev-frontend dev-backend install format
 
-BACKEND_PORT ?= 8000
+BACKEND_PORT ?= 8002
 
 # --- Docker Commands ---
 up:

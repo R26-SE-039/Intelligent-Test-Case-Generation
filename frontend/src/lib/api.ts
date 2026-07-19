@@ -4,7 +4,7 @@
  * matching the Makefile's `BACKEND_PORT ?= 8000`).
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8002";
 
 // Per-request fetch timeout. Without this, a hung backend (restarting, wrong
 // port, blocked by firewall) freezes the UI on its loading spinner forever.
