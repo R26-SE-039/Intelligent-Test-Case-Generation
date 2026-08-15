@@ -8,6 +8,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
 import os
 import uuid
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from dotenv import load_dotenv
 import logging
 
@@ -21,12 +22,22 @@ DATABASE_URL = os.getenv(
     "postgresql://admin:password123@localhost:5432/nextgen_qa",
 )
 
-# SQLAlchemy needs asyncpg driver for async — convert URL scheme
-ASYNC_DATABASE_URL = DATABASE_URL.replace(
-    "postgresql://", "postgresql+asyncpg://"
-)
+# Neon (and other managed Postgres) require SSL and carry libpq-style params in
+# the URL (?sslmode=require, &channel_binding=require) that the asyncpg driver
+# does not understand. Detect that, strip those params, and enforce SSL via
+# connect_args instead. Local non-SSL Postgres is unaffected.
+_needs_ssl = "neon.tech" in DATABASE_URL or "sslmode=require" in DATABASE_URL
+_parts = urlsplit(DATABASE_URL)
+_query = [(k, v) for k, v in parse_qsl(_parts.query) if k not in ("sslmode", "channel_binding")]
+_clean_url = urlunsplit((_parts.scheme, _parts.netloc, _parts.path, urlencode(_query), _parts.fragment))
 
-engine = create_async_engine(ASYNC_DATABASE_URL, echo=False, future=True)
+# SQLAlchemy needs the asyncpg driver for async -- convert the URL scheme.
+ASYNC_DATABASE_URL = _clean_url.replace("postgresql://", "postgresql+asyncpg://")
+
+_connect_args = {"ssl": "require"} if _needs_ssl else {}
+engine = create_async_engine(
+    ASYNC_DATABASE_URL, echo=False, future=True, connect_args=_connect_args
+)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
