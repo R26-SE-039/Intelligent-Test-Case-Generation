@@ -35,6 +35,11 @@ _clean_url = urlunsplit((_parts.scheme, _parts.netloc, _parts.path, urlencode(_q
 ASYNC_DATABASE_URL = _clean_url.replace("postgresql://", "postgresql+asyncpg://")
 
 _connect_args = {"ssl": "require"} if _needs_ssl else {}
+# Neon "-pooler" hosts sit behind PgBouncer (transaction pooling), where
+# asyncpg's prepared-statement cache causes "prepared statement does not
+# exist" errors — disable the cache on pooled endpoints.
+if "-pooler" in _parts.netloc:
+    _connect_args["statement_cache_size"] = 0
 engine = create_async_engine(
     ASYNC_DATABASE_URL, echo=False, future=True, connect_args=_connect_args
 )
@@ -68,6 +73,16 @@ async def init_db():
          project_id) into a synthetic 'Default Project' so no data is lost.
     """
     async with engine.begin() as conn:
+        # ------------------------------------------------------------------
+        # Step 0: Create any missing tables from the model metadata FIRST.
+        # On a brand-new database (e.g. a fresh Neon instance) the ALTER
+        # statements below would otherwise fail — the tables they patch only
+        # pre-exist on legacy local databases. create_all skips tables that
+        # already exist, so legacy databases still take the ALTER path.
+        # ------------------------------------------------------------------
+        from app.models import Base as ModelBase
+        await conn.run_sync(ModelBase.metadata.create_all)
+
         # ------------------------------------------------------------------
         # Step 1: Create the projects table first (if not exists)
         # ------------------------------------------------------------------
@@ -177,11 +192,7 @@ async def init_db():
             """))
             logger.info("user_stories primary key upgraded.")
 
-        # ------------------------------------------------------------------
-        # Step 5: Now create all remaining tables via SQLAlchemy metadata
-        # ------------------------------------------------------------------
-        from app.models import Base as ModelBase
-        await conn.run_sync(ModelBase.metadata.create_all)
+        # (Step 5 removed — table creation now happens in Step 0 above.)
 
         # ------------------------------------------------------------------
         # Step 5.1: TestSuite versioning columns + constraint swap.
