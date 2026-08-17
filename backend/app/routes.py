@@ -44,12 +44,18 @@ router = APIRouter(prefix="/api/v1", tags=["pipeline"])
 class ProjectIn(BaseModel):
     name: str
     description: Optional[str] = None
+    # Optional client-supplied UUID. The merged NextGenQA frontend passes the
+    # auth-service project id here so both services share one project id.
+    id: Optional[uuid.UUID] = None
+    # Auth-service organization UUID (reference only — auth owns orgs).
+    organization_id: Optional[uuid.UUID] = None
 
 
 class ProjectOut(BaseModel):
     id: str
     name: str
     description: Optional[str]
+    organization_id: Optional[str] = None
     created_at: Optional[str]
 
     class Config:
@@ -65,6 +71,8 @@ class UserStoryIn(BaseModel):
     status: str = "pending"
     source: str = "manual"
     acceptance_criteria: list[str] = []
+    # Auth-service iteration UUID, set when importing from C1.
+    iteration_id: Optional[uuid.UUID] = None
 
 
 class UserStoryOut(BaseModel):
@@ -77,6 +85,7 @@ class UserStoryOut(BaseModel):
     status: str
     source: str
     acceptance_criteria: list[str]
+    iteration_id: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -118,6 +127,7 @@ def _story_out(s: UserStory) -> UserStoryOut:
         status=s.status.value,
         source=s.source,
         acceptance_criteria=json.loads(s.acceptance_criteria or "[]"),
+        iteration_id=str(s.iteration_id) if s.iteration_id else None,
     )
 
 
@@ -138,16 +148,45 @@ def _gherkin_out(g: GherkinScenario) -> GherkinOut:
 
 @router.post("/projects", response_model=ProjectOut)
 async def create_project(body: ProjectIn, db: AsyncSession = Depends(get_db)):
-    """Create a new project (blank workspace)."""
+    """Create a new project (blank workspace).
+
+    When `id` is supplied the call is a get-or-create: an existing project with
+    that id is returned as-is, so external services (the auth service) can keep
+    a single shared project id without a mapping table.
+    """
+    if body.id is not None:
+        existing = await db.get(Project, body.id)
+        if existing:
+            # Backfill the org reference on projects created before the
+            # auth-flow alignment migration.
+            if body.organization_id and existing.organization_id != body.organization_id:
+                existing.organization_id = body.organization_id
+                db.add(existing)
+                await db.commit()
+                await db.refresh(existing)
+            return ProjectOut(
+                id=str(existing.id),
+                name=existing.name,
+                description=existing.description,
+                organization_id=str(existing.organization_id) if existing.organization_id else None,
+                created_at=existing.created_at.isoformat() if existing.created_at else None,
+            )
+
     # Check name uniqueness
     result = await db.execute(select(Project).where(Project.name == body.name))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail=f"Project '{body.name}' already exists")
+    conflicting = result.scalar_one_or_none()
+    if conflicting is not None:
+        if body.id is None:
+            raise HTTPException(status_code=409, detail=f"Project '{body.name}' already exists")
+        # id is the real key for bridged projects — dedupe the display name
+        # instead of failing so get-or-create stays idempotent.
+        body.name = f"{body.name} ({str(body.id)[:8]})"
 
     project = Project(
-        id=uuid.uuid4(),
+        id=body.id or uuid.uuid4(),
         name=body.name,
         description=body.description,
+        organization_id=body.organization_id,
     )
     db.add(project)
     await db.commit()
@@ -157,6 +196,7 @@ async def create_project(body: ProjectIn, db: AsyncSession = Depends(get_db)):
         id=str(project.id),
         name=project.name,
         description=project.description,
+        organization_id=str(project.organization_id) if project.organization_id else None,
         created_at=project.created_at.isoformat() if project.created_at else None,
     )
 
@@ -171,6 +211,7 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
             id=str(p.id),
             name=p.name,
             description=p.description,
+            organization_id=str(p.organization_id) if p.organization_id else None,
             created_at=p.created_at.isoformat() if p.created_at else None,
         )
         for p in projects
@@ -194,13 +235,16 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
 # ─── Story endpoints (project-scoped) ────────────────────────────────────────
 
 @router.get("/projects/{project_id}/stories", response_model=list[UserStoryOut])
-async def list_stories(project_id: str, db: AsyncSession = Depends(get_db)):
-    """List all user stories for a project."""
-    result = await db.execute(
-        select(UserStory)
-        .where(UserStory.project_id == project_id)
-        .order_by(UserStory.created_at.asc())
-    )
+async def list_stories(
+    project_id: str,
+    iteration_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """List all user stories for a project, optionally scoped to one iteration."""
+    query = select(UserStory).where(UserStory.project_id == project_id)
+    if iteration_id:
+        query = query.where(UserStory.iteration_id == iteration_id)
+    result = await db.execute(query.order_by(UserStory.created_at.asc()))
     stories = result.scalars().all()
     return [_story_out(s) for s in stories]
 
@@ -238,6 +282,7 @@ async def save_stories_bulk(
             existing.status = Status(s.status)
             existing.source = s.source
             existing.acceptance_criteria = json.dumps(s.acceptance_criteria)
+            existing.iteration_id = s.iteration_id
             db.add(existing)
             saved.append(existing)
         else:
@@ -251,6 +296,7 @@ async def save_stories_bulk(
                 status=Status(s.status),
                 source=s.source,
                 acceptance_criteria=json.dumps(s.acceptance_criteria),
+                iteration_id=s.iteration_id,
             )
             db.add(story)
             saved.append(story)
@@ -291,6 +337,7 @@ async def add_story(
         existing.status = Status(story.status)
         existing.source = story.source
         existing.acceptance_criteria = json.dumps(story.acceptance_criteria)
+        existing.iteration_id = story.iteration_id
         db.add(existing)
         await db.commit()
         await db.refresh(existing)
@@ -306,6 +353,7 @@ async def add_story(
         status=Status(story.status),
         source=story.source,
         acceptance_criteria=json.dumps(story.acceptance_criteria),
+        iteration_id=story.iteration_id,
     )
     db.add(new_story)
     await db.commit()

@@ -8,6 +8,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
 import os
 import uuid
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from dotenv import load_dotenv
 import logging
 
@@ -21,12 +22,36 @@ DATABASE_URL = os.getenv(
     "postgresql://admin:password123@localhost:5432/nextgen_qa",
 )
 
-# SQLAlchemy needs asyncpg driver for async — convert URL scheme
-ASYNC_DATABASE_URL = DATABASE_URL.replace(
-    "postgresql://", "postgresql+asyncpg://"
-)
+# Neon (and other managed Postgres) require SSL and carry libpq-style params in
+# the URL (?sslmode=require, &channel_binding=require) that the asyncpg driver
+# does not understand. Detect that, strip those params, and enforce SSL via
+# connect_args instead. Local non-SSL Postgres is unaffected.
+_needs_ssl = "neon.tech" in DATABASE_URL or "sslmode=require" in DATABASE_URL
+_parts = urlsplit(DATABASE_URL)
+_query = [(k, v) for k, v in parse_qsl(_parts.query) if k not in ("sslmode", "channel_binding")]
+_clean_url = urlunsplit((_parts.scheme, _parts.netloc, _parts.path, urlencode(_query), _parts.fragment))
 
-engine = create_async_engine(ASYNC_DATABASE_URL, echo=False, future=True)
+# SQLAlchemy needs the asyncpg driver for async -- convert the URL scheme.
+ASYNC_DATABASE_URL = _clean_url.replace("postgresql://", "postgresql+asyncpg://")
+
+_connect_args = {"ssl": "require"} if _needs_ssl else {}
+# Neon "-pooler" hosts sit behind PgBouncer (transaction pooling), where
+# asyncpg's prepared-statement cache causes "prepared statement does not
+# exist" errors — disable the cache on pooled endpoints.
+if "-pooler" in _parts.netloc:
+    _connect_args["statement_cache_size"] = 0
+# Neon closes idle connections after a few minutes, so a plain client-side
+# pool hands out dead sockets ("connection is closed" InterfaceError).
+# pre_ping validates each pooled connection before use and recycle refreshes
+# anything older than Neon's idle window.
+engine = create_async_engine(
+    ASYNC_DATABASE_URL,
+    echo=False,
+    future=True,
+    connect_args=_connect_args,
+    pool_pre_ping=True,
+    pool_recycle=240,
+)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
@@ -57,6 +82,16 @@ async def init_db():
          project_id) into a synthetic 'Default Project' so no data is lost.
     """
     async with engine.begin() as conn:
+        # ------------------------------------------------------------------
+        # Step 0: Create any missing tables from the model metadata FIRST.
+        # On a brand-new database (e.g. a fresh Neon instance) the ALTER
+        # statements below would otherwise fail — the tables they patch only
+        # pre-exist on legacy local databases. create_all skips tables that
+        # already exist, so legacy databases still take the ALTER path.
+        # ------------------------------------------------------------------
+        from app.models import Base as ModelBase
+        await conn.run_sync(ModelBase.metadata.create_all)
+
         # ------------------------------------------------------------------
         # Step 1: Create the projects table first (if not exists)
         # ------------------------------------------------------------------
@@ -166,11 +201,7 @@ async def init_db():
             """))
             logger.info("user_stories primary key upgraded.")
 
-        # ------------------------------------------------------------------
-        # Step 5: Now create all remaining tables via SQLAlchemy metadata
-        # ------------------------------------------------------------------
-        from app.models import Base as ModelBase
-        await conn.run_sync(ModelBase.metadata.create_all)
+        # (Step 5 removed — table creation now happens in Step 0 above.)
 
         # ------------------------------------------------------------------
         # Step 5.1: TestSuite versioning columns + constraint swap.
@@ -206,6 +237,35 @@ async def init_db():
                     ADD CONSTRAINT uq_test_suites_project_framework_version
                     UNIQUE (project_id, framework, version)
             """))
+
+        # ------------------------------------------------------------------
+        # Step 5.2: Auth-flow alignment — reference UUIDs from the auth
+        # service (user_db). projects.organization_id and
+        # user_stories.iteration_id store auth/C1 UUIDs only; the auth
+        # service remains the system of record. The UNIQUE(name) constraint
+        # is dropped because the project id (shared with the auth service)
+        # is the real identity — different organizations may reuse names.
+        # ------------------------------------------------------------------
+        await conn.execute(text("""
+            ALTER TABLE projects
+                ADD COLUMN IF NOT EXISTS organization_id UUID
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_projects_organization_id
+                ON projects (organization_id)
+        """))
+        await conn.execute(text("""
+            ALTER TABLE projects
+                DROP CONSTRAINT IF EXISTS projects_name_key
+        """))
+        await conn.execute(text("""
+            ALTER TABLE user_stories
+                ADD COLUMN IF NOT EXISTS iteration_id UUID
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_user_stories_iteration_id
+                ON user_stories (iteration_id)
+        """))
 
         # ------------------------------------------------------------------
         # Step 6: Fix stuck "processing" stories — mark as "done" if they

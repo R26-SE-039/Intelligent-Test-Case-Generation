@@ -29,7 +29,7 @@ from app.database import get_db
 from app.models import TestRunExecution, TestRunScreenshot, TestRun, TestSuite
 
 from .log_broker import broker as log_broker
-from .runner import start_run
+from .runner import start_rerun, start_run
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +129,30 @@ def _run_out(row: TestRunExecution) -> RunOut:
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
+
+
+@router.post("/runs/{run_id}/rerun", response_model=ExecuteResponse)
+async def rerun_existing_run(run_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Re-run a previous GitHub Actions run. Fast path — uses GitHub's official
+    rerun API on the existing `gh_run_id` instead of creating a fresh branch
+    + workflow_dispatch. The returned `run_id` is a NEW TestRunExecution row
+    so the dashboard can subscribe to its own WS stream.
+    """
+    row_q = await db.execute(select(TestRunExecution).where(TestRunExecution.id == run_id))
+    row = row_q.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if row.mode != "github" or not row.github_run_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Re-run is only available for GitHub Actions runs.",
+        )
+    try:
+        new_run_id = await start_rerun(prev_run_id=run_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return ExecuteResponse(run_id=new_run_id, mode="github")
 
 
 @router.post("/execute", response_model=ExecuteResponse)
