@@ -38,12 +38,18 @@ class Project(Base):
     """
     Top-level container.  Every user story belongs to exactly one project.
     Deleting a project cascades to its stories and their Gherkin scenarios.
+
+    The id mirrors the auth-service project UUID (get-or-create), and
+    organization_id references the auth-service organization. The auth
+    service (user_db) stays the system of record for both — this table
+    only stores the UUIDs, never copies of their data.
     """
     __tablename__ = "projects"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(200), nullable=False, unique=True)
+    name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
+    organization_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -70,6 +76,9 @@ class UserStory(Base):
     status = Column(SAEnum(Status), default=Status.pending)
     source = Column(String(20), default="manual")       # "C1" or "manual"
     acceptance_criteria = Column(Text, default="[]")    # JSON array stored as text
+    # Auth-service iteration UUID (set on C1 imports). Reference only — the
+    # auth service owns iterations; RTM can trace story → iteration with it.
+    iteration_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

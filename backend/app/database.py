@@ -230,6 +230,35 @@ async def init_db():
             """))
 
         # ------------------------------------------------------------------
+        # Step 5.2: Auth-flow alignment — reference UUIDs from the auth
+        # service (user_db). projects.organization_id and
+        # user_stories.iteration_id store auth/C1 UUIDs only; the auth
+        # service remains the system of record. The UNIQUE(name) constraint
+        # is dropped because the project id (shared with the auth service)
+        # is the real identity — different organizations may reuse names.
+        # ------------------------------------------------------------------
+        await conn.execute(text("""
+            ALTER TABLE projects
+                ADD COLUMN IF NOT EXISTS organization_id UUID
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_projects_organization_id
+                ON projects (organization_id)
+        """))
+        await conn.execute(text("""
+            ALTER TABLE projects
+                DROP CONSTRAINT IF EXISTS projects_name_key
+        """))
+        await conn.execute(text("""
+            ALTER TABLE user_stories
+                ADD COLUMN IF NOT EXISTS iteration_id UUID
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_user_stories_iteration_id
+                ON user_stories (iteration_id)
+        """))
+
+        # ------------------------------------------------------------------
         # Step 6: Fix stuck "processing" stories — mark as "done" if they
         # already have a Gherkin scenario generated.
         # ------------------------------------------------------------------
