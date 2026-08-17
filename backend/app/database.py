@@ -40,8 +40,17 @@ _connect_args = {"ssl": "require"} if _needs_ssl else {}
 # exist" errors — disable the cache on pooled endpoints.
 if "-pooler" in _parts.netloc:
     _connect_args["statement_cache_size"] = 0
+# Neon closes idle connections after a few minutes, so a plain client-side
+# pool hands out dead sockets ("connection is closed" InterfaceError).
+# pre_ping validates each pooled connection before use and recycle refreshes
+# anything older than Neon's idle window.
 engine = create_async_engine(
-    ASYNC_DATABASE_URL, echo=False, future=True, connect_args=_connect_args
+    ASYNC_DATABASE_URL,
+    echo=False,
+    future=True,
+    connect_args=_connect_args,
+    pool_pre_ping=True,
+    pool_recycle=240,
 )
 
 AsyncSessionLocal = async_sessionmaker(
