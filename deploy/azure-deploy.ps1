@@ -34,10 +34,10 @@ $ImageTag      = 'c2-backend:latest'
 $Sku = 'B1'
 
 # Secrets / runtime env (mirror your backend/.env)
-$DatabaseUrl     = 'postgresql://neondb_owner:PASSWORD@ep-xxx.ap-southeast-1.aws.neon.tech/nextgen_qa?sslmode=require'
+$DatabaseUrl     = 'postgresql://neondb_owner:npg_1JSOfeXy5atl@ep-polished-salad-azlpw5lj-pooler.c-3.ap-southeast-1.aws.neon.tech/Test-case-gen-C2?sslmode=require&channel_binding=require'
 $LlmProvider     = 'anthropic'
 $LlmModel        = 'claude-sonnet-4-6'
-$LlmApiKey       = 'sk-ant-REPLACE_ME'
+$LlmApiKey       = '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'
 $AgentVisionModel= 'claude-sonnet-4-6'
 # Optional GitHub execution feature — leave blank if unused:
 $GithubToken     = ''
