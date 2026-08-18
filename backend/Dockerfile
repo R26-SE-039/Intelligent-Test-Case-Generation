@@ -18,9 +18,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 RUN playwright install-deps chromium
 
-# Download spaCy model
-RUN python -m spacy download en_core_web_trf
-
 COPY ./app ./app
 
 EXPOSE 8002
