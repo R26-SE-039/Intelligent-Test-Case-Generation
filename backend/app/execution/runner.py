@@ -52,7 +52,11 @@ def _flow_name_for(scenario: str) -> str:
     return "other"
 
 
-async def detect_mode(project_id: str, force: Optional[str] = None) -> str:
+async def detect_mode(
+    project_id: str,
+    force: Optional[str] = None,
+    auth_header: Optional[str] = None,
+) -> str:
     """
     Pick 'github' if the project has a saved connection (or the legacy
     GITHUB_TOKEN env var is set), else 'local'. `force` wins when the
@@ -60,7 +64,7 @@ async def detect_mode(project_id: str, force: Optional[str] = None) -> str:
     """
     if force in ("github", "local"):
         return force
-    project_cfg = await GitHubConfig.from_project(project_id)
+    project_cfg = await GitHubConfig.from_project(project_id, auth_header)
     if project_cfg is not None:
         return "github"
     return "github" if GitHubConfig.from_env() else "local"
@@ -71,6 +75,7 @@ async def start_run(
     suite_id: str,
     project_id: str,
     force_mode: Optional[str] = None,
+    auth_header: Optional[str] = None,
 ) -> str:
     """
     Create the TestRunExecution row, hand off to the chosen runner in a
@@ -88,7 +93,7 @@ async def start_run(
             log_broker.close(run_id)
             raise ValueError("Suite not found")
 
-        mode = await detect_mode(project_id, force_mode)
+        mode = await detect_mode(project_id, force_mode, auth_header)
         row = TestRunExecution(
             id=uuid.UUID(run_id),
             project_id=project_id,
@@ -102,11 +107,11 @@ async def start_run(
 
     # Fire-and-forget background task. asyncio.create_task pins it to the
     # current event loop so it survives past the HTTP response.
-    asyncio.create_task(_drive_run(run_id, suite_id, project_id))
+    asyncio.create_task(_drive_run(run_id, suite_id, project_id, auth_header))
     return run_id
 
 
-async def start_rerun(*, prev_run_id: str) -> str:
+async def start_rerun(*, prev_run_id: str, auth_header: Optional[str] = None) -> str:
     """
     Trigger GitHub's "re-run" on an existing TestRunExecution. Creates a
     fresh DB row that tracks the new attempt, but reuses the previous run's
@@ -150,11 +155,16 @@ async def start_rerun(*, prev_run_id: str) -> str:
         db.add(new_row)
         await db.commit()
 
-    asyncio.create_task(_drive_rerun(new_run_id, prev_run_id))
+    asyncio.create_task(_drive_rerun(new_run_id, prev_run_id, auth_header))
     return new_run_id
 
 
-async def _drive_run(run_id: str, suite_id: str, project_id: str) -> None:
+async def _drive_run(
+    run_id: str,
+    suite_id: str,
+    project_id: str,
+    auth_header: Optional[str],
+) -> None:
     """The actual long-running coroutine. Catches every exception so a crash
     here never leaks into the FastAPI request handler."""
     try:
@@ -173,7 +183,7 @@ async def _drive_run(run_id: str, suite_id: str, project_id: str) -> None:
             })
 
             if row.mode == "github":
-                await _run_via_github(db, row, suite)
+                await _run_via_github(db, row, suite, auth_header)
             else:
                 await _run_locally(db, row, suite)
 
@@ -203,7 +213,11 @@ async def _drive_run(run_id: str, suite_id: str, project_id: str) -> None:
         log_broker.close(run_id)
 
 
-async def _drive_rerun(new_run_id: str, prev_run_id: str) -> None:
+async def _drive_rerun(
+    new_run_id: str,
+    prev_run_id: str,
+    auth_header: Optional[str],
+) -> None:
     """
     Background worker for `start_rerun`. Calls GitHub's rerun API on the
     previous run's gh_run_id, then streams progress of the new attempt
@@ -222,7 +236,7 @@ async def _drive_rerun(new_run_id: str, prev_run_id: str) -> None:
             db.add(row)
             await db.commit()
 
-            cfg = await GitHubConfig.from_project(str(row.project_id))
+            cfg = await GitHubConfig.from_project(str(row.project_id), auth_header)
             if cfg is None:
                 cfg = GitHubConfig.from_env()
             if cfg is None:
@@ -271,6 +285,9 @@ async def _drive_rerun(new_run_id: str, prev_run_id: str) -> None:
                 "type": "step", "step": "Fetching log archive", "status": "running",
             })
             log_text = await github_runner.fetch_run_log(cfg, row.github_run_id)
+            log_broker.publish(new_run_id, {
+                "type": "step", "step": "Fetching log archive", "status": "passed",
+            })
             row.raw_log_text = log_text
             passed, failed = _parse_pytest_summary(log_text)
             row.passed_count = passed
@@ -329,10 +346,11 @@ async def _run_via_github(
     db: AsyncSession,
     row: TestRunExecution,
     suite: TestSuite,
+    auth_header: Optional[str],
 ) -> None:
-    # Prefer the per-project connection saved via Settings → GitHub Connect.
-    # Fall back to the legacy GITHUB_TOKEN env if that's the only thing set.
-    cfg = await GitHubConfig.from_project(str(row.project_id))
+    # Prefer project configuration from auth-service (repo_url + PAT).
+    # Fall back to the legacy per-project GitHub connection and env vars.
+    cfg = await GitHubConfig.from_project(str(row.project_id), auth_header)
     if cfg is None:
         cfg = GitHubConfig.from_env()
     assert cfg is not None  # detect_mode guarantees this when mode='github'
@@ -371,6 +389,9 @@ async def _run_via_github(
             "type": "step", "step": "Fetching log archive", "status": "running",
         })
         log_text = await github_runner.fetch_run_log(cfg, trigger.run_id_github)
+        log_broker.publish(str(row.id), {
+            "type": "step", "step": "Fetching log archive", "status": "passed",
+        })
         row.raw_log_text = log_text
 
         # Parse counts from the log just like the local runner does.
@@ -387,6 +408,9 @@ async def _run_via_github(
         # GH path failed — try local as a graceful fallback so the demo
         # always produces a result.
         logger.warning("GitHub path failed (%s); falling back to local runner.", e)
+        log_broker.publish(str(row.id), {
+            "type": "step", "step": "Fetching log archive", "status": "failed",
+        })
         log_broker.publish(str(row.id), {
             "type": "step",
             "step": f"GitHub path failed ({e}); falling back to local runner",

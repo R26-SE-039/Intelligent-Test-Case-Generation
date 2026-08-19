@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -132,7 +132,11 @@ def _run_out(row: TestRunExecution) -> RunOut:
 
 
 @router.post("/runs/{run_id}/rerun", response_model=ExecuteResponse)
-async def rerun_existing_run(run_id: str, db: AsyncSession = Depends(get_db)):
+async def rerun_existing_run(
+    run_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Re-run a previous GitHub Actions run. Fast path — uses GitHub's official
     rerun API on the existing `gh_run_id` instead of creating a fresh branch
@@ -149,14 +153,21 @@ async def rerun_existing_run(run_id: str, db: AsyncSession = Depends(get_db)):
             detail="Re-run is only available for GitHub Actions runs.",
         )
     try:
-        new_run_id = await start_rerun(prev_run_id=run_id)
+        new_run_id = await start_rerun(
+            prev_run_id=run_id,
+            auth_header=request.headers.get("authorization"),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return ExecuteResponse(run_id=new_run_id, mode="github")
 
 
 @router.post("/execute", response_model=ExecuteResponse)
-async def execute_suite(body: ExecuteRequest, db: AsyncSession = Depends(get_db)):
+async def execute_suite(
+    body: ExecuteRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     """Kick off a run for the chosen suite and return its run_id."""
     suite_q = await db.execute(select(TestSuite).where(TestSuite.id == body.suite_id))
     suite = suite_q.scalar_one_or_none()
@@ -170,6 +181,7 @@ async def execute_suite(body: ExecuteRequest, db: AsyncSession = Depends(get_db)
             suite_id=body.suite_id,
             project_id=body.project_id,
             force_mode=body.mode,
+            auth_header=request.headers.get("authorization"),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
