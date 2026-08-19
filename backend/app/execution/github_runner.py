@@ -27,6 +27,7 @@ import zipfile
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -35,6 +36,68 @@ logger = logging.getLogger(__name__)
 
 GITHUB_API_BASE = "https://api.github.com"
 WORKFLOW_FILENAME = "nextgenqa-run.yml"
+AUTH_SERVICE_BASE_URL = os.getenv(
+    "AUTH_SERVICE_BASE_URL",
+    "http://localhost:8080/api/auth-service",
+).rstrip("/")
+
+
+def _parse_github_repo(repo_url: str) -> Optional[tuple[str, str]]:
+    raw = repo_url.strip()
+    if not raw:
+        return None
+
+    # Supports both HTTPS and SSH clone formats.
+    if raw.startswith("git@github.com:"):
+        path = raw.split(":", 1)[1]
+    else:
+        parsed = urlparse(raw)
+        host = parsed.netloc.lower()
+        if host not in {"github.com", "www.github.com"}:
+            return None
+        path = parsed.path.lstrip("/")
+
+    if path.endswith(".git"):
+        path = path[:-4]
+
+    parts = [part for part in path.split("/") if part]
+    if len(parts) < 2:
+        return None
+    return parts[0], parts[1]
+
+
+async def _load_auth_service_config(
+    project_id: str,
+    auth_header: str,
+) -> Optional[tuple[str, str, str]]:
+    url = f"{AUTH_SERVICE_BASE_URL}/projects/{project_id}/configuration"
+    headers = {
+        "Authorization": auth_header,
+        "Accept": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, headers=headers)
+        if response.status_code in (401, 403, 404):
+            return None
+        response.raise_for_status()
+        payload = response.json() if response.content else {}
+    except Exception as exc:
+        logger.warning(
+            "Failed to read project configuration from auth-service for project %s: %s",
+            project_id,
+            exc,
+        )
+        return None
+
+    token = (payload.get("personal_access_token") or "").strip()
+    repo_url = (payload.get("repo_url") or "").strip()
+    parsed = _parse_github_repo(repo_url)
+    if not token or parsed is None:
+        return None
+
+    owner, repo = parsed
+    return token, owner, repo
 
 
 @dataclass
@@ -64,12 +127,27 @@ class GitHubConfig:
         )
 
     @classmethod
-    async def from_project(cls, project_id: str) -> Optional["GitHubConfig"]:
+    async def from_project(
+        cls,
+        project_id: str,
+        auth_header: Optional[str] = None,
+    ) -> Optional["GitHubConfig"]:
         """
-        Preferred constructor — looks up the project's saved connection
-        and decrypts the token. Returns None if the project hasn't been
-        connected from the dashboard.
+        Preferred constructor — looks up Git credentials from auth-service
+        project configuration (repo_url + personal_access_token) using the
+        caller's JWT. Falls back to legacy project_github_connections table.
         """
+        if auth_header:
+            auth_cfg = await _load_auth_service_config(project_id, auth_header)
+            if auth_cfg is not None:
+                token, owner, repo = auth_cfg
+                return cls(
+                    token=token,
+                    owner=owner,
+                    repo=repo,
+                    base_branch=os.getenv("GITHUB_BASE_BRANCH", "main"),
+                )
+
         # Local import to avoid a circular dependency at module load.
         from app.github_connection import load_connection
 
@@ -429,7 +507,18 @@ jobs:
       - name: Run Cypress
         if: ${{ inputs.framework == 'cypress' }}
         run: |
-          npx cypress run --spec tests/
+                    cat > cypress.config.cjs <<'EOF'
+                    module.exports = {
+                        e2e: {
+                            baseUrl: process.env.CYPRESS_baseUrl,
+                            specPattern: 'tests/**/*.cy.{js,jsx,ts,tsx}',
+                            supportFile: false,
+                        },
+                        video: true,
+                        screenshotOnRunFailure: true,
+                    };
+                    EOF
+                    npx cypress run --config-file cypress.config.cjs --e2e --spec "tests/**/*.cy.{js,jsx,ts,tsx}"
         env:
           CYPRESS_baseUrl: ${{ inputs.staging_url }}
 
@@ -441,6 +530,8 @@ jobs:
           path: |
             **/screenshots/
             allure-results/
+                        cypress/screenshots/
+                        cypress/videos/
 
       - name: Notify NextGen QA backend
         if: always() && env.NEXTGENQA_WEBHOOK_URL != ''

@@ -9,14 +9,14 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: 'NextGen QA run id (UUID)'
+        description: "NextGen QA run id (UUID)"
         required: true
       framework:
-        description: 'selenium | playwright | cypress'
+        description: "selenium | playwright | cypress"
         required: true
-        default: 'playwright'
+        default: "playwright"
       staging_url:
-        description: 'Target staging URL'
+        description: "Target staging URL"
         required: true
 
 jobs:
@@ -29,13 +29,13 @@ jobs:
         if: ${{ inputs.framework != 'cypress' }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Set up Node
         if: ${{ inputs.framework == 'cypress' }}
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install Playwright runner
         if: ${{ inputs.framework == 'playwright' }}
@@ -63,7 +63,18 @@ jobs:
       - name: Run Cypress
         if: ${{ inputs.framework == 'cypress' }}
         run: |
-          npx cypress run --spec tests/
+          cat > cypress.config.cjs <<'EOF'
+          module.exports = {
+            e2e: {
+              baseUrl: process.env.CYPRESS_baseUrl,
+              specPattern: 'tests/**/*.cy.{js,jsx,ts,tsx}',
+              supportFile: false,
+            },
+            video: true,
+            screenshotOnRunFailure: true,
+          };
+          EOF
+          npx cypress run --config-file cypress.config.cjs --e2e --spec "tests/**/*.cy.{js,jsx,ts,tsx}"
         env:
           CYPRESS_baseUrl: ${{ inputs.staging_url }}
 
