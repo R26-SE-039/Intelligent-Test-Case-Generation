@@ -8,12 +8,17 @@ known-good DOM selectors (ground truth for locator self-healing), through the
 API Gateway. C3 never touches C2's database.
 
 Endpoints (reached by C3 via the gateway as `/api/test-case` + these paths):
-  GET /api/v1/projects/{project_id}/failed-tests   — failed scenarios ready to analyze
-  GET /api/v1/projects/{project_id}/selectors      — approved selectors for locator repair
+  GET /api/v1/projects/{project_id}/failed-tests          — failed scenarios ready to analyze
+  GET /api/v1/projects/{project_id}/selectors             — approved selectors for locator repair
+  GET /api/v1/projects/{project_id}/test-suites           — generated test code + metadata
+  GET /api/v1/projects/{project_id}/test-suites/{suite_id} — one suite (full code)
+  GET /api/v1/projects/{project_id}/test-runs             — run executions (run-level, log preview)
+  GET /api/v1/projects/{project_id}/test-runs/{run_id}    — one execution + scenarios + full log
 """
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Optional
 
@@ -23,7 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Project, TestRun, DomElement
+from app.models import GherkinScenario, Project, TestRun, TestRunExecution, TestSuite, DomElement, UserStory
 
 router = APIRouter(prefix="/api/v1", tags=["integration (C3)"])
 
@@ -81,6 +86,155 @@ class SelectorsResponse(BaseModel):
     selectors: list[SelectorOut]
 
 
+class TestSuiteOut(BaseModel):
+    """The generated executable test code C3 needs to apply a self-healing fix."""
+    id: str
+    project_id: str
+    framework: str          # selenium | playwright | cypress
+    language: str           # python | javascript
+    filename: str
+    code: str               # the actual source C3 edits when healing
+    mode: str               # abstract | dom
+    url: str
+    version: int
+    is_active: bool
+    selected_for_run: bool
+    source_scenario_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class TestSuitesResponse(BaseModel):
+    project_id: str
+    total: int
+    test_suites: list[TestSuiteOut]
+
+
+class RunScenarioOut(BaseModel):
+    scenario_name: str
+    flow_name: str
+    status: str
+    duration_ms: Optional[int] = None
+    error_message: Optional[str] = None
+
+
+class TestRunExecutionOut(BaseModel):
+    """Run-level record of one 'Run Tests' execution (CI/CD or local)."""
+    id: str
+    project_id: str
+    suite_id: Optional[str] = None
+    framework: str
+    mode: str               # github | local
+    status: str             # queued | running | passed | failed | error
+    github_run_id: Optional[str] = None
+    github_run_url: Optional[str] = None
+    github_branch: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    duration_ms: Optional[int] = None
+    total_count: int = 0
+    passed_count: int = 0
+    failed_count: int = 0
+    error_message: Optional[str] = None
+    log_preview: Optional[str] = None   # last lines of raw_log_text
+
+
+class TestRunExecutionDetailOut(TestRunExecutionOut):
+    raw_log: Optional[str] = None       # full execution log
+    scenarios: list[RunScenarioOut] = []
+
+
+class TestRunsResponse(BaseModel):
+    project_id: str
+    total: int
+    test_runs: list[TestRunExecutionOut]
+
+
+class TraceabilityGherkinOut(BaseModel):
+    id: str
+    story_id: str
+    project_id: str
+    feature_name: str
+    gherkin_text: str
+    generator: str
+    llm_model: Optional[str] = None
+    edited_by_qa: bool
+    approved: bool
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class TraceabilityStoryOut(BaseModel):
+    id: str
+    project_id: str
+    iteration_id: Optional[str] = None
+    actor: str
+    action: str
+    goal: str
+    priority: str
+    status: str
+    source: str
+    acceptance_criteria: list[str]
+    gherkin_scenarios: list[TraceabilityGherkinOut]
+
+
+class TraceabilitySuiteOut(BaseModel):
+    id: str
+    project_id: str
+    framework: str
+    language: str
+    filename: str
+    code: str
+    mode: str
+    url: str
+    version: int
+    is_active: bool
+    selected_for_run: bool
+    source_scenario_ids: list[str]
+    source_scenario_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class TraceabilityScenarioResultOut(BaseModel):
+    test_run_id: str
+    scenario_name: str
+    flow_name: str
+    result: str
+    duration_ms: Optional[int] = None
+    error_message: Optional[str] = None
+    executed_at: Optional[str] = None
+
+
+class TraceabilityExecutionOut(BaseModel):
+    id: str
+    project_id: str
+    suite_id: Optional[str] = None
+    framework: str
+    mode: str
+    status: str
+    github_run_id: Optional[str] = None
+    github_run_url: Optional[str] = None
+    github_branch: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    duration_ms: Optional[int] = None
+    total_count: int
+    passed_count: int
+    failed_count: int
+    error_message: Optional[str] = None
+    raw_log: Optional[str] = None
+    artifacts: dict
+    scenario_results: list[TraceabilityScenarioResultOut]
+
+
+class ProjectTraceabilityOut(BaseModel):
+    project: dict
+    stories: list[TraceabilityStoryOut]
+    suites: list[TraceabilitySuiteOut]
+    executions: list[TraceabilityExecutionOut]
+
+
 # ─── Heuristics ──────────────────────────────────────────────────────────────
 
 # Try to pull a CSS/XPath-ish selector out of a failure message so C3's locator
@@ -136,6 +290,228 @@ def _to_failure(row: TestRun) -> FailureForAnalysis:
     )
 
 
+def _suite_out(row: TestSuite) -> TestSuiteOut:
+    return TestSuiteOut(
+        id=str(row.id),
+        project_id=str(row.project_id),
+        framework=row.framework,
+        language=row.language,
+        filename=row.filename,
+        code=row.code,
+        mode=row.mode,
+        url=row.url,
+        version=row.version,
+        is_active=bool(row.is_active),
+        selected_for_run=bool(row.selected_for_run),
+        source_scenario_count=row.source_scenario_count or 0,
+        created_at=row.created_at.isoformat() if row.created_at else None,
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
+    )
+
+
+def _log_tail(text: Optional[str], lines: int = 200) -> Optional[str]:
+    if not text:
+        return None
+    return "\n".join(text.splitlines()[-lines:])
+
+
+def _execution_out(row: TestRunExecution) -> TestRunExecutionOut:
+    return TestRunExecutionOut(
+        id=str(row.id),
+        project_id=str(row.project_id),
+        suite_id=str(row.suite_id) if row.suite_id else None,
+        framework=row.framework,
+        mode=row.mode,
+        status=row.status,
+        github_run_id=row.github_run_id,
+        github_run_url=row.github_run_url,
+        github_branch=row.github_branch,
+        started_at=row.started_at.isoformat() if row.started_at else None,
+        finished_at=row.finished_at.isoformat() if row.finished_at else None,
+        duration_ms=row.duration_ms,
+        total_count=row.total_count or 0,
+        passed_count=row.passed_count or 0,
+        failed_count=row.failed_count or 0,
+        error_message=row.error_message,
+        log_preview=_log_tail(row.raw_log_text),
+    )
+
+
+async def _require_project(project_id: str, db: AsyncSession) -> None:
+    proj = await db.execute(select(Project).where(Project.id == project_id))
+    if not proj.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+
+def _status_result(status: str) -> str:
+    return "PASS" if status.lower() == "passed" else "FAIL"
+
+
+@router.get("/projects/{project_id}/traceability", response_model=ProjectTraceabilityOut)
+async def get_project_traceability(
+    project_id: str,
+    iteration_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the complete story-to-execution view needed by C3 and RTM.
+
+    The response is assembled from C2's normalized tables. Iterations remain
+    owned by the auth service; C2 returns the iteration UUID stored on each
+    imported story as a cross-service reference.
+    """
+    project_result = await db.execute(select(Project).where(Project.id == project_id))
+    project = project_result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    story_query = select(UserStory).where(UserStory.project_id == project_id)
+    if iteration_id:
+        story_query = story_query.where(UserStory.iteration_id == iteration_id)
+    story_rows = (await db.execute(story_query.order_by(UserStory.created_at.asc()))).scalars().all()
+
+    gherkin_rows = (
+        await db.execute(
+            select(GherkinScenario)
+            .where(GherkinScenario.project_id == project_id)
+            .order_by(GherkinScenario.created_at.asc())
+        )
+    ).scalars().all()
+    gherkin_by_story: dict[str, list[GherkinScenario]] = {}
+    for row in gherkin_rows:
+        gherkin_by_story.setdefault(row.story_id, []).append(row)
+
+    suite_rows = (
+        await db.execute(
+            select(TestSuite)
+            .where(TestSuite.project_id == project_id)
+            .order_by(TestSuite.framework.asc(), TestSuite.version.desc())
+        )
+    ).scalars().all()
+
+    execution_query = (
+        select(TestRunExecution)
+        .where(TestRunExecution.project_id == project_id)
+        .order_by(TestRunExecution.started_at.desc())
+    )
+    execution_rows = (await db.execute(execution_query)).scalars().all()
+
+    scenario_rows: list[TestRun] = []
+    if execution_rows:
+        # TestRun currently stores the suite and scenario result, while the
+        # execution table stores the run-level record. Keep both identifiers
+        # in the response so consumers can retain the complete audit trail.
+        scenario_query = select(TestRun).where(TestRun.project_id == project_id)
+        scenario_rows = (await db.execute(scenario_query.order_by(TestRun.executed_at.asc()))).scalars().all()
+
+    scenarios_by_suite: dict[str, list[TestRun]] = {}
+    for row in scenario_rows:
+        if row.suite_id:
+            scenarios_by_suite.setdefault(str(row.suite_id), []).append(row)
+
+    stories = [
+        TraceabilityStoryOut(
+            id=row.id,
+            project_id=str(row.project_id),
+            iteration_id=str(row.iteration_id) if row.iteration_id else None,
+            actor=row.actor,
+            action=row.action,
+            goal=row.goal,
+            priority=row.priority.value,
+            status=row.status.value,
+            source=row.source,
+            acceptance_criteria=json.loads(row.acceptance_criteria or "[]"),
+            gherkin_scenarios=[
+                TraceabilityGherkinOut(
+                    id=str(gherkin.id),
+                    story_id=gherkin.story_id,
+                    project_id=str(gherkin.project_id),
+                    feature_name=gherkin.feature_name,
+                    gherkin_text=gherkin.gherkin_text,
+                    generator=gherkin.generator,
+                    llm_model=gherkin.llm_model,
+                    edited_by_qa=bool(gherkin.edited_by_qa),
+                    approved=bool(gherkin.approved),
+                    created_at=gherkin.created_at.isoformat() if gherkin.created_at else None,
+                    updated_at=gherkin.updated_at.isoformat() if gherkin.updated_at else None,
+                )
+                for gherkin in gherkin_by_story.get(row.id, [])
+            ],
+        )
+        for row in story_rows
+    ]
+
+    suites = [
+        TraceabilitySuiteOut(
+            id=str(row.id),
+            project_id=str(row.project_id),
+            framework=row.framework,
+            language=row.language,
+            filename=row.filename,
+            code=row.code,
+            mode=row.mode,
+            url=row.url,
+            version=row.version,
+            is_active=bool(row.is_active),
+            selected_for_run=bool(row.selected_for_run),
+            source_scenario_ids=[str(value) for value in (row.source_scenario_ids or [])],
+            source_scenario_count=row.source_scenario_count or 0,
+            created_at=row.created_at.isoformat() if row.created_at else None,
+            updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        )
+        for row in suite_rows
+    ]
+
+    executions = [
+        TraceabilityExecutionOut(
+            id=str(row.id),
+            project_id=str(row.project_id),
+            suite_id=str(row.suite_id) if row.suite_id else None,
+            framework=row.framework,
+            mode=row.mode,
+            status=row.status,
+            github_run_id=row.github_run_id,
+            github_run_url=row.github_run_url,
+            github_branch=row.github_branch,
+            started_at=row.started_at.isoformat() if row.started_at else None,
+            finished_at=row.finished_at.isoformat() if row.finished_at else None,
+            duration_ms=row.duration_ms,
+            total_count=row.total_count or 0,
+            passed_count=row.passed_count or 0,
+            failed_count=row.failed_count or 0,
+            error_message=row.error_message,
+            raw_log=row.raw_log_text,
+            artifacts=row.artifacts_json or {},
+            scenario_results=[
+                TraceabilityScenarioResultOut(
+                    test_run_id=str(scenario.id),
+                    scenario_name=scenario.scenario_name,
+                    flow_name=scenario.flow_name,
+                    result=_status_result(scenario.status),
+                    duration_ms=scenario.duration_ms,
+                    error_message=scenario.error_message,
+                    executed_at=scenario.executed_at.isoformat() if scenario.executed_at else None,
+                )
+                for scenario in scenarios_by_suite.get(str(row.suite_id), [])
+            ],
+        )
+        for row in execution_rows
+    ]
+
+    return ProjectTraceabilityOut(
+        project={
+            "id": str(project.id),
+            "name": project.name,
+            "description": project.description,
+            "organization_id": str(project.organization_id) if project.organization_id else None,
+            "created_at": project.created_at.isoformat() if project.created_at else None,
+            "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+        },
+        stories=stories,
+        suites=suites,
+        executions=executions,
+    )
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 
@@ -153,9 +529,7 @@ async def get_failed_tests(
     C3 polls this to discover fresh failures to classify + heal. Each item is a
     ready-to-analyze failure; optionally scope to one suite with `suite_id`.
     """
-    proj = await db.execute(select(Project).where(Project.id == project_id))
-    if not proj.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await _require_project(project_id, db)
 
     query = (
         select(TestRun)
@@ -185,9 +559,7 @@ async def get_selectors(
 
     Filter by page `url`, or set `approved_only=true` for QA-approved selectors.
     """
-    proj = await db.execute(select(Project).where(Project.id == project_id))
-    if not proj.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await _require_project(project_id, db)
 
     query = select(DomElement).where(DomElement.project_id == project_id)
     if url:
@@ -211,3 +583,128 @@ async def get_selectors(
         for r in rows
     ]
     return SelectorsResponse(project_id=project_id, total=len(selectors), selectors=selectors)
+
+
+@router.get("/projects/{project_id}/test-suites", response_model=TestSuitesResponse)
+async def get_test_suites(
+    project_id: str,
+    active_only: bool = False,
+    selected_only: bool = False,
+    framework: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generated test suites (with their source code) for a project. C3 needs the
+    actual code to apply a self-healing fix in context.
+
+    `active_only=true` returns only the head of each version chain;
+    `selected_only=true` returns the one suite marked for the next CI/CD run;
+    `framework` filters to selenium | playwright | cypress.
+    """
+    await _require_project(project_id, db)
+
+    query = select(TestSuite).where(TestSuite.project_id == project_id)
+    if active_only:
+        query = query.where(TestSuite.is_active.is_(True))
+    if selected_only:
+        query = query.where(TestSuite.selected_for_run.is_(True))
+    if framework:
+        query = query.where(TestSuite.framework == framework)
+    query = query.order_by(TestSuite.framework.asc(), TestSuite.version.desc())
+
+    rows = (await db.execute(query)).scalars().all()
+    suites = [_suite_out(r) for r in rows]
+    return TestSuitesResponse(project_id=project_id, total=len(suites), test_suites=suites)
+
+
+@router.get("/projects/{project_id}/test-suites/{suite_id}", response_model=TestSuiteOut)
+async def get_test_suite(
+    project_id: str,
+    suite_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """One test suite's full detail (including code), scoped to the project."""
+    await _require_project(project_id, db)
+    row = (
+        await db.execute(
+            select(TestSuite)
+            .where(TestSuite.id == suite_id)
+            .where(TestSuite.project_id == project_id)
+        )
+    ).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Test suite not found in this project")
+    return _suite_out(row)
+
+
+@router.get("/projects/{project_id}/test-runs", response_model=TestRunsResponse)
+async def get_test_runs(
+    project_id: str,
+    limit: int = 20,
+    status: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Run-level execution records (one per 'Run Tests'), newest first, with a log
+    preview. Filter with `status` (e.g. `failed`); use the detail endpoint for
+    the full log + per-scenario breakdown.
+    """
+    await _require_project(project_id, db)
+
+    query = (
+        select(TestRunExecution)
+        .where(TestRunExecution.project_id == project_id)
+        .order_by(TestRunExecution.started_at.desc())
+        .limit(max(1, min(limit, 200)))
+    )
+    if status:
+        query = query.where(TestRunExecution.status == status)
+
+    rows = (await db.execute(query)).scalars().all()
+    runs = [_execution_out(r) for r in rows]
+    return TestRunsResponse(project_id=project_id, total=len(runs), test_runs=runs)
+
+
+@router.get("/projects/{project_id}/test-runs/{run_id}", response_model=TestRunExecutionDetailOut)
+async def get_test_run(
+    project_id: str,
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    One execution's full detail: run metadata, the complete raw log, and every
+    scenario result — the deepest context C3 can use to analyze a failure.
+    """
+    await _require_project(project_id, db)
+    row = (
+        await db.execute(
+            select(TestRunExecution)
+            .where(TestRunExecution.id == run_id)
+            .where(TestRunExecution.project_id == project_id)
+        )
+    ).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Run not found in this project")
+
+    # Scenarios are tracked per suite; scope by the execution's suite when present.
+    sc_query = select(TestRun).where(TestRun.project_id == project_id)
+    if row.suite_id:
+        sc_query = sc_query.where(TestRun.suite_id == row.suite_id)
+    sc_query = sc_query.order_by(TestRun.executed_at.asc())
+    scenarios = (await db.execute(sc_query)).scalars().all()
+
+    base = _execution_out(row)
+    return TestRunExecutionDetailOut(
+        **base.model_dump(),
+        raw_log=row.raw_log_text,
+        scenarios=[
+            RunScenarioOut(
+                scenario_name=s.scenario_name,
+                flow_name=s.flow_name,
+                status=s.status,
+                duration_ms=s.duration_ms,
+                error_message=s.error_message,
+            )
+            for s in scenarios
+        ],
+    )
