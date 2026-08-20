@@ -69,12 +69,49 @@ async def generate_test_suite(
         elif framework == "cypress":
             framework_instructions = "Use JavaScript with Cypress (cy.get, cy.visit, etc.)."
 
+        runtime_constraints = ""
+        if framework == "playwright":
+            runtime_constraints = (
+                "\nRuntime constraints (must follow):\n"
+                "- Generated Playwright tests must run in Linux CI without a display server.\n"
+                "- Launch browser in headless mode (headless=True or default headless launch).\n"
+                "- Do NOT force headed mode (headless=False).\n"
+            )
+
+        saucedemo_knowledge = ""
+        if "saucedemo.com" in (url or "").lower():
+            saucedemo_knowledge = (
+                "\nSauceDemo behavior rules (must follow exactly):\n"
+                "- Login success URL is /inventory.html.\n"
+                "- Invalid login error text is exactly: \"Epic sadface: Username and password do not match any user in this service\".\n"
+                "- Login page URL checks must tolerate optional trailing slash.\n"
+                "- When cart is empty, .shopping_cart_badge is usually NOT visible; do NOT assert badge text \"0\".\n"
+                "- Use .shopping_cart_link for cart navigation.\n"
+                "- Do NOT generate scenarios that click remove for an item not in cart.\n"
+                "- Do NOT generate scenarios that click the same add-to-cart selector twice for \"already added\".\n"
+                "- For \"already added\" behavior, verify the button transitions to remove state and badge count stays 1.\n"
+                "- For successful checkout, postal code must be non-empty (e.g., \"12345\").\n"
+                "- For missing postal code, keep postal empty and expect exact error: \"Error: Postal Code is required\".\n"
+            )
+
+        test_design_rules = (
+            "\nTest design and implementation rules (must follow):\n"
+            "- Never call one test function from another test function.\n"
+            "- Put shared actions in helpers and call helpers from tests.\n"
+            "- Use a fresh browser context/page per test for isolation.\n"
+            "- If a helper already performs an action (e.g., click Continue), do not repeat it in test body.\n"
+            "- Prefer robust selectors (data-test or known stable selectors) over brittle text-only assumptions.\n"
+        )
+
         prompt = f"""You are an expert QA Automation Engineer.
 I have several Gherkin feature files for a project. I want you to write a single, complete test suite file combining the implementation for ALL of these features.
 
 Target Framework: {framework_instructions}
 Target URL: {url}
 Mode Instructions: {mode_instruction}
+{runtime_constraints}
+{saucedemo_knowledge}
+{test_design_rules}
 
 Here are the Gherkin features:
 {features_str}

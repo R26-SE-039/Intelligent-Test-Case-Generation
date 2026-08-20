@@ -299,6 +299,7 @@ def _build_llm_prompt(story: dict, template_name: str, scenario_mode: str = "lea
             "- Valid password: secret_sauce\n"
             "- Invalid case should use wrong_user / wrong_pass\n"
             "- Invalid login error text must be EXACTLY: \"Epic sadface: Username and password do not match any user in this service\"\n"
+            "- Login page URL checks should allow optional trailing slash on the base URL.\n"
             "- Keep login scenarios simple; do NOT introduce cart, checkout, sorting, or out-of-stock assumptions.\n"
         )
 
@@ -309,6 +310,9 @@ def _build_llm_prompt(story: dict, template_name: str, scenario_mode: str = "lea
             "- When cart becomes empty, the cart badge should NOT be displayed (do not expect \"0\").\n"
             "- Use \"Sauce Labs Backpack\" as the stable sample product.\n"
             "- Keep scenarios simple; avoid unsupported empty-cart banner assumptions.\n"
+            "- Do NOT generate scenarios that try to remove an item when the item is not in the cart.\n"
+            "- Do NOT generate scenarios that try to add the same product twice with the same add selector.\n"
+            "- For add behavior, prefer checking state transition to Remove and cart badge count.\n"
         )
 
     checkout_knowledge = ""
