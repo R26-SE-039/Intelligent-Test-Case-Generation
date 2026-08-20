@@ -24,9 +24,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func as sa_func, update
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
 import hashlib
 import json
+import re
 import uuid
 
 from app.database import get_db
@@ -94,6 +95,7 @@ class UserStoryOut(BaseModel):
 class GenerateRequest(BaseModel):
     story_ids: list[str]
     project_id: str
+    scenario_mode: Literal["lean", "full"] = "lean"
 
 
 class GherkinOut(BaseModel):
@@ -434,7 +436,10 @@ async def generate_gherkin_for_stories(
             "acceptance_criteria": json.loads(story.acceptance_criteria or "[]"),
         }
 
-        gherkin_text, generator_name = await generate_gherkin(story_dict)
+        gherkin_text, generator_name = await generate_gherkin(
+            story_dict,
+            body.scenario_mode,
+        )
 
         existing_q = await db.execute(
             select(GherkinScenario).where(
@@ -539,6 +544,7 @@ async def toggle_approve_gherkin(
 async def regenerate_gherkin(
     project_id: str,
     story_id: str,
+    scenario_mode: Literal["lean", "full"] = "lean",
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -564,7 +570,7 @@ async def regenerate_gherkin(
         "acceptance_criteria": json.loads(story.acceptance_criteria or "[]"),
     }
 
-    gherkin_text, generator_name = await generate_gherkin(story_dict)
+    gherkin_text, generator_name = await generate_gherkin(story_dict, scenario_mode)
 
     existing_q = await db.execute(
         select(GherkinScenario).where(
@@ -653,7 +659,13 @@ def _scenarios_fingerprint(scenarios: list[GherkinScenario]) -> tuple[str, list[
         h.update(b"\x00")
         h.update(text.encode())
         h.update(b"\x00")
-    return h.hexdigest(), [sid for sid, _ in pairs], len(pairs)
+    scenario_block_count = 0
+    for _, text in pairs:
+        scenario_block_count += len(
+            re.findall(r"^\s*Scenario(?: Outline)?:\s*.+$", text or "", flags=re.M)
+        )
+    count = scenario_block_count if scenario_block_count > 0 else len(pairs)
+    return h.hexdigest(), [sid for sid, _ in pairs], count
 
 
 def _dom_elements_fingerprint(elements: list[DomElement]) -> str:
@@ -705,7 +717,10 @@ async def _current_combined_hash(db: AsyncSession, project_id: str, url: str) ->
     in the new suite row) and GET /code/suites (to mark older rows stale).
     """
     sc_q = await db.execute(
-        select(GherkinScenario).where(GherkinScenario.project_id == project_id)
+        select(GherkinScenario).where(
+            GherkinScenario.project_id == project_id,
+            GherkinScenario.approved.is_(True),
+        )
     )
     scenarios_hash, _, _ = _scenarios_fingerprint(sc_q.scalars().all())
 
@@ -732,12 +747,15 @@ async def generate_code(
     so the QA can restore it from the dedicated editor's version dropdown.
     """
     result = await db.execute(
-        select(GherkinScenario).where(GherkinScenario.project_id == body.project_id)
+        select(GherkinScenario).where(
+            GherkinScenario.project_id == body.project_id,
+            GherkinScenario.approved.is_(True),
+        )
     )
     scenarios = result.scalars().all()
 
     if not scenarios:
-        raise HTTPException(status_code=404, detail="No Gherkin scenarios found for this project.")
+        raise HTTPException(status_code=404, detail="No approved Gherkin scenarios found for this project.")
 
     gherkin_texts = [s.gherkin_text for s in scenarios if s.gherkin_text]
     if not gherkin_texts:

@@ -312,7 +312,13 @@ def _suite_out(row: TestSuite) -> TestSuiteOut:
 def _log_tail(text: Optional[str], lines: int = 200) -> Optional[str]:
     if not text:
         return None
-    return "\n".join(text.splitlines()[-lines:])
+        pass_fail = [
+            ln for ln in text.splitlines()
+            if re.search(r"\b(PASSED|FAILED|ERROR|passed|failed|error)\b", ln)
+        ]
+        if not pass_fail:
+            return None
+        return "\n".join(pass_fail[-lines:])
 
 
 def _execution_out(row: TestRunExecution) -> TestRunExecutionOut:

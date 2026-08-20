@@ -178,10 +178,6 @@ async def _drive_run(
             db.add(row)
             await db.commit()
 
-            log_broker.publish(run_id, {
-                "type": "step", "step": f"Starting {row.mode} run", "status": "running",
-            })
-
             if row.mode == "github":
                 await _run_via_github(db, row, suite, auth_header)
             else:
@@ -242,12 +238,6 @@ async def _drive_rerun(
             if cfg is None:
                 raise RuntimeError("No GitHub connection available for this project.")
 
-            log_broker.publish(new_run_id, {
-                "type": "step",
-                "step": f"Re-running GitHub run {row.github_run_id}",
-                "status": "running",
-            })
-
             try:
                 trigger = await github_runner.rerun_workflow_run(cfg, row.github_run_id)
             except Exception as e:
@@ -281,13 +271,7 @@ async def _drive_rerun(
                 cfg, row.github_run_id, on_step=_emit
             )
 
-            log_broker.publish(new_run_id, {
-                "type": "step", "step": "Fetching log archive", "status": "running",
-            })
             log_text = await github_runner.fetch_run_log(cfg, row.github_run_id)
-            log_broker.publish(new_run_id, {
-                "type": "step", "step": "Fetching log archive", "status": "passed",
-            })
             row.raw_log_text = log_text
             passed, failed = _parse_pytest_summary(log_text)
             row.passed_count = passed
@@ -385,13 +369,7 @@ async def _run_via_github(
         )
 
         # Fetch the full log archive once the run is done.
-        log_broker.publish(str(row.id), {
-            "type": "step", "step": "Fetching log archive", "status": "running",
-        })
         log_text = await github_runner.fetch_run_log(cfg, trigger.run_id_github)
-        log_broker.publish(str(row.id), {
-            "type": "step", "step": "Fetching log archive", "status": "passed",
-        })
         row.raw_log_text = log_text
 
         # Parse counts from the log just like the local runner does.
@@ -414,7 +392,7 @@ async def _run_via_github(
         log_broker.publish(str(row.id), {
             "type": "step",
             "step": f"GitHub path failed ({e}); falling back to local runner",
-            "status": "info",
+            "status": "failed",
         })
         row.mode = "local"
         db.add(row)

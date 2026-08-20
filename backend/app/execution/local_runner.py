@@ -89,7 +89,6 @@ def _run_pytest_blocking(
     for line in proc.stdout:
         line = line.rstrip("\r\n")
         raw_lines.append(line)
-        log_broker.publish_threadsafe(run_id, {"type": "log", "line": line})
 
         m = _SCENARIO_LINE.search(line)
         if m:
@@ -151,12 +150,6 @@ async def run_suite_locally(
         .replace("__STAGING_URL__", staging_url)
     )
     conftest.write_text(conftest_body, encoding="utf-8")
-
-    log_broker.publish(run_id, {
-        "type": "step",
-        "step": f"Local runner spawning pytest for {framework}",
-        "status": "running",
-    })
 
     cmd = [
         sys.executable, "-u", "-m", "pytest",

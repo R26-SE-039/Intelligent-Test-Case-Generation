@@ -3,20 +3,13 @@ Feature: {{ feature_name }}
   I want to {{ action }}
   So that I can {{ goal }}
 
-  Scenario: Add item to cart
-    Given I am on the products page
-    When I click "Add to cart" on "Sauce Labs Backpack"
-    Then the cart badge should show "1"
-    And the button label should change to "Remove"
+  Scenario: Successfully remove product from cart
+    Given I have "Sauce Labs Backpack" in my shopping cart
+    When I click "Remove" on "Sauce Labs Backpack"
+    Then the cart badge should not be displayed
+    And "Sauce Labs Backpack" should no longer be in my cart
 
-  Scenario: Remove item from cart
-    Given I have "Sauce Labs Backpack" in my cart
-    When I click "Remove" on that item
-    Then the cart badge should show "0"
-    And the item should no longer be in the cart
-
-  Scenario: Cart persists across navigation
-    Given I have items in my cart
-    When I navigate to a different page
-    And I navigate back to the cart
-    Then the items should still be in my cart
+  Scenario: Verify cart is empty when no products are added
+    Given I have no items in my shopping cart
+    Then the cart should be empty
+    And the cart badge should not be displayed

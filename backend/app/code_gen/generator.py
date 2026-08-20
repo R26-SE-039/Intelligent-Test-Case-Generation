@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Optional
 import httpx
 
@@ -29,6 +30,13 @@ async def generate_test_suite(
 
         # Build prompt
         features_str = "\n\n".join(f"Feature {i+1}:\n{text}" for i, text in enumerate(gherkin_texts))
+        scenario_titles: list[str] = []
+        for text in gherkin_texts:
+            scenario_titles.extend(
+                m.group(1).strip()
+                for m in re.finditer(r"^\s*Scenario(?: Outline)?:\s*(.+)$", text or "", re.M)
+            )
+        scenario_block = "\n".join(f"- {title}" for title in scenario_titles) or "- (none parsed)"
 
         mode_instruction = ""
         if mode == "dom":
@@ -61,15 +69,61 @@ async def generate_test_suite(
         elif framework == "cypress":
             framework_instructions = "Use JavaScript with Cypress (cy.get, cy.visit, etc.)."
 
+        runtime_constraints = ""
+        if framework == "playwright":
+            runtime_constraints = (
+                "\nRuntime constraints (must follow):\n"
+                "- Generated Playwright tests must run in Linux CI without a display server.\n"
+                "- Launch browser in headless mode (headless=True or default headless launch).\n"
+                "- Do NOT force headed mode (headless=False).\n"
+            )
+
+        saucedemo_knowledge = ""
+        if "saucedemo.com" in (url or "").lower():
+            saucedemo_knowledge = (
+                "\nSauceDemo behavior rules (must follow exactly):\n"
+                "- Login success URL is /inventory.html.\n"
+                "- Invalid login error text is exactly: \"Epic sadface: Username and password do not match any user in this service\".\n"
+                "- Login page URL checks must tolerate optional trailing slash.\n"
+                "- When cart is empty, .shopping_cart_badge is usually NOT visible; do NOT assert badge text \"0\".\n"
+                "- Use .shopping_cart_link for cart navigation.\n"
+                "- Do NOT generate scenarios that click remove for an item not in cart.\n"
+                "- Do NOT generate scenarios that click the same add-to-cart selector twice for \"already added\".\n"
+                "- For \"already added\" behavior, verify the button transitions to remove state and badge count stays 1.\n"
+                "- For successful checkout, postal code must be non-empty (e.g., \"12345\").\n"
+                "- For missing postal code, keep postal empty and expect exact error: \"Error: Postal Code is required\".\n"
+            )
+
+        test_design_rules = (
+            "\nTest design and implementation rules (must follow):\n"
+            "- Never call one test function from another test function.\n"
+            "- Put shared actions in helpers and call helpers from tests.\n"
+            "- Use a fresh browser context/page per test for isolation.\n"
+            "- If a helper already performs an action (e.g., click Continue), do not repeat it in test body.\n"
+            "- Prefer robust selectors (data-test or known stable selectors) over brittle text-only assumptions.\n"
+        )
+
         prompt = f"""You are an expert QA Automation Engineer.
 I have several Gherkin feature files for a project. I want you to write a single, complete test suite file combining the implementation for ALL of these features.
 
 Target Framework: {framework_instructions}
 Target URL: {url}
 Mode Instructions: {mode_instruction}
+{runtime_constraints}
+{saucedemo_knowledge}
+{test_design_rules}
 
 Here are the Gherkin features:
 {features_str}
+
+Strict scope rules (must follow):
+1. Generate tests ONLY for the scenarios explicitly listed in the input Gherkin.
+2. Do NOT add extra scenarios from product knowledge or assumptions.
+3. Do NOT include unrelated flow logic (e.g., cart/checkout/search) unless those scenarios are explicitly present.
+4. Keep selectors and helper utilities limited to what the listed scenarios need.
+
+Scenario titles to implement:
+{scenario_block}
 
 Please generate the complete, ready-to-run automation code for all of the above features. Include necessary imports, setup/teardown (or fixtures/hooks like beforeEach/pytest.fixture), and map the Given/When/Then steps to code as best as possible.
 Return ONLY the raw source code. Do not include markdown code block syntax (like ```python or ```javascript). Just the raw text.
