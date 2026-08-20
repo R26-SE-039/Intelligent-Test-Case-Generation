@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Optional
 import httpx
 
@@ -29,6 +30,13 @@ async def generate_test_suite(
 
         # Build prompt
         features_str = "\n\n".join(f"Feature {i+1}:\n{text}" for i, text in enumerate(gherkin_texts))
+        scenario_titles: list[str] = []
+        for text in gherkin_texts:
+            scenario_titles.extend(
+                m.group(1).strip()
+                for m in re.finditer(r"^\s*Scenario(?: Outline)?:\s*(.+)$", text or "", re.M)
+            )
+        scenario_block = "\n".join(f"- {title}" for title in scenario_titles) or "- (none parsed)"
 
         mode_instruction = ""
         if mode == "dom":
@@ -70,6 +78,15 @@ Mode Instructions: {mode_instruction}
 
 Here are the Gherkin features:
 {features_str}
+
+Strict scope rules (must follow):
+1. Generate tests ONLY for the scenarios explicitly listed in the input Gherkin.
+2. Do NOT add extra scenarios from product knowledge or assumptions.
+3. Do NOT include unrelated flow logic (e.g., cart/checkout/search) unless those scenarios are explicitly present.
+4. Keep selectors and helper utilities limited to what the listed scenarios need.
+
+Scenario titles to implement:
+{scenario_block}
 
 Please generate the complete, ready-to-run automation code for all of the above features. Include necessary imports, setup/teardown (or fixtures/hooks like beforeEach/pytest.fixture), and map the Given/When/Then steps to code as best as possible.
 Return ONLY the raw source code. Do not include markdown code block syntax (like ```python or ```javascript). Just the raw text.

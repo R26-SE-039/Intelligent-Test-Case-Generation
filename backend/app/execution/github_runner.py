@@ -357,22 +357,15 @@ async def stream_run_progress(
                     res = step.get("conclusion")   # success | failure | skipped | cancelled | neutral | None
                     if state == "completed" and key not in seen:
                         seen.add(key)
-                        # Map GitHub's conclusion vocab to our UI status set.
-                        # Crucially: skipped/cancelled are NOT failures — they
-                        # ran an `if:` gate that didn't match, or were halted
-                        # by a prior failure. Rendering them red was wrong.
                         if res == "success":
                             ui_status = "passed"
                         elif res == "failure":
                             ui_status = "failed"
-                        elif res in ("skipped", "cancelled", "neutral"):
-                            ui_status = "skipped"
                         else:
-                            ui_status = "info"
+                            ui_status = None
+                        if ui_status is None:
+                            continue
                         on_step({"step": step["name"], "status": ui_status})
-                    elif state == "in_progress" and (key, "running") not in seen:
-                        seen.add((key, "running"))
-                        on_step({"step": step["name"], "status": "running"})
 
             if status == "completed":
                 final_conclusion = conclusion or "neutral"

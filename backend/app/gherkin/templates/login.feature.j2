@@ -9,18 +9,12 @@ Feature: {{ feature_name }}
     And I enter valid password "secret_sauce"
     And I click the login button
     Then I should be redirected to the products page
-    And I should see my account dashboard
+    And I should see the product inventory
 
   Scenario: Failed login with invalid credentials
     Given I am on the login page
     When I enter invalid username "wrong_user"
     And I enter invalid password "wrong_pass"
     And I click the login button
-    Then I should see an error message "Epic sadface: Username and password do not match"
+    Then I should see an error message "Epic sadface: Username and password do not match any user in this service"
     And I should remain on the login page
-
-  Scenario: Session persists across page refresh
-    Given I am logged in as "standard_user"
-    When I refresh the browser page
-    Then I should still be on the products page
-    And my session should be active

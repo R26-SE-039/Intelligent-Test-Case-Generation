@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -128,6 +129,22 @@ def _run_out(row: TestRunExecution) -> RunOut:
     )
 
 
+_PASS_FAIL_LINE = re.compile(r"\b(PASSED|FAILED|ERROR|passed|failed|error)\b")
+_SUMMARY_LINE = re.compile(r"=+.*(passed|failed|error).*=+", re.I)
+
+
+def _result_only_log(text: Optional[str]) -> str:
+    if not text:
+        return "(log not yet available - run is still in progress)"
+
+    lines = text.splitlines()
+    result_lines = [ln for ln in lines if _PASS_FAIL_LINE.search(ln) or _SUMMARY_LINE.search(ln)]
+    if not result_lines:
+        return "(no PASS/FAIL lines detected in log output)"
+
+    return "\n".join(result_lines[-200:])
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 
@@ -230,7 +247,7 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
     shots = sh_q.scalars().all()
 
     base = _run_out(row)
-    log = row.raw_log_text or ""
+    result_log = _result_only_log(row.raw_log_text)
     return RunDetailOut(
         **base.model_dump(),
         scenarios=[
@@ -250,19 +267,19 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
                 image_url=f"/api/v1/runs/{row.id}/screenshots/{Path(s.image_path).name}",
             ) for s in shots
         ],
-        raw_log_preview="\n".join(log.splitlines()[-400:]),
+        raw_log_preview="\n".join(result_log.splitlines()[-200:]),
     )
 
 
 @router.get("/runs/{run_id}/log")
 async def download_run_log(run_id: str, db: AsyncSession = Depends(get_db)):
-    """Raw log file (text/plain). Saved to DB at run end; also written to disk."""
+    """Result log file (text/plain) containing pass/fail/error lines only."""
     row_q = await db.execute(select(TestRunExecution).where(TestRunExecution.id == run_id))
     row = row_q.scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="Run not found")
     return PlainTextResponse(
-        row.raw_log_text or "(log not yet available — run is still in progress)",
+        _result_only_log(row.raw_log_text),
         headers={
             "Content-Disposition": f"attachment; filename=nextgenqa-run-{run_id}.log"
         },

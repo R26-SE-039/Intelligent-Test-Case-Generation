@@ -17,9 +17,11 @@ Feature: {{ feature_name }}
   Scenario: Checkout with missing information
     Given I have items in my cart
     When I proceed to checkout
-    And I leave the first name empty
+    And I fill in first name "John"
+    And I fill in last name "Doe"
+    And I leave the postal code empty
     And I click Continue
-    Then I should see error "First Name is required"
+    Then I should see error "Error: Postal Code is required"
     And I should remain on the checkout information page
 
   Scenario: Checkout total is correct

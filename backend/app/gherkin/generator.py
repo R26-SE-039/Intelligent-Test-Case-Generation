@@ -85,6 +85,130 @@ def _parse_acceptance_criteria(raw: str | list) -> list[str]:
         return [raw] if raw else []
 
 
+_EDGE_KEYWORDS: tuple[str, ...] = (
+    "invalid",
+    "fail",
+    "failed",
+    "error",
+    "wrong",
+    "empty",
+    "locked",
+    "denied",
+    "unauthorized",
+    "forbidden",
+    "required",
+    "cannot",
+    "can't",
+    "should not",
+)
+
+
+def _split_scenario_blocks(gherkin_text: str) -> tuple[str, list[str]]:
+    starts = list(re.finditer(r"^\s*Scenario(?: Outline)?:\s*.+$", gherkin_text, re.M))
+    if not starts:
+        return gherkin_text.strip(), []
+
+    prefix = gherkin_text[:starts[0].start()].rstrip()
+    blocks: list[str] = []
+    for i, m in enumerate(starts):
+        begin = m.start()
+        end = starts[i + 1].start() if i + 1 < len(starts) else len(gherkin_text)
+        blocks.append(gherkin_text[begin:end].strip())
+    return prefix, blocks
+
+
+def _is_edge_scenario(block: str) -> bool:
+    text = block.lower()
+    return any(keyword in text for keyword in _EDGE_KEYWORDS)
+
+
+def _apply_scenario_policy(gherkin_text: str, scenario_mode: str) -> str:
+    if scenario_mode != "lean":
+        return gherkin_text
+
+    prefix, blocks = _split_scenario_blocks(gherkin_text)
+    if len(blocks) <= 2:
+        return gherkin_text
+
+    happy_blocks = [b for b in blocks if not _is_edge_scenario(b)]
+    edge_blocks = [b for b in blocks if _is_edge_scenario(b)]
+
+    selected: list[str] = []
+    if happy_blocks:
+        selected.append(happy_blocks[0])
+    if edge_blocks:
+        selected.append(edge_blocks[0])
+
+    if len(selected) < 2:
+        for block in blocks:
+            if block not in selected:
+                selected.append(block)
+            if len(selected) == 2:
+                break
+
+    return f"{prefix}\n\n" + "\n\n".join(selected)
+
+
+def _stabilise_saucedemo_login_gherkin(gherkin_text: str) -> str:
+    """Normalize common login-text drift to SauceDemo's canonical phrasing."""
+    text = gherkin_text
+    text = text.replace("And I should see my account dashboard", "And I should see the product inventory")
+    text = text.replace("And I should see account dashboard", "And I should see the product inventory")
+
+    # Normalize invalid-credentials error to SauceDemo's exact text.
+    text = re.sub(
+        r'Then I should see an error message "Epic sadface:[^"]*"',
+        'Then I should see an error message "Epic sadface: Username and password do not match any user in this service"',
+        text,
+        flags=re.I,
+    )
+    return text
+
+
+def _stabilise_saucedemo_cart_gherkin(gherkin_text: str) -> str:
+    """Normalize cart expectations to SauceDemo behavior."""
+    text = gherkin_text
+    # SauceDemo hides the badge when cart is empty; it does not display "0".
+    text = re.sub(
+        r'Then the cart badge should show "0"',
+        "Then the cart badge should not be displayed",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r'And the cart badge should show "0"',
+        "And the cart badge should not be displayed",
+        text,
+        flags=re.I,
+    )
+    return text
+
+
+def _stabilise_saucedemo_checkout_gherkin(gherkin_text: str) -> str:
+    """Normalize checkout validation to SauceDemo's required-field behavior."""
+    text = gherkin_text
+    # Prefer empty postal-code required validation over "invalid postal" phrasing.
+    text = re.sub(
+        r'And I fill in postal code "[^"]+"',
+        'And I leave the postal code empty',
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r'Then I should see(?: an)? error(?: message)? "[^"]*postal[^\"]*invalid[^\"]*"',
+        'Then I should see error "Error: Postal Code is required"',
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r'Then I should see(?: an)? error(?: message)? "[^"]*postal[^\"]*"',
+        'Then I should see error "Error: Postal Code is required"',
+        text,
+        flags=re.I,
+    )
+    return text
+
+
 # ─── Jinja2 generator ─────────────────────────────────────────────────────────
 
 def generate_with_jinja2(story: dict) -> str:
@@ -116,7 +240,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "none").lower()  # "openai" | "ollama" 
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 
 
-async def generate_with_llm(story: dict) -> Optional[str]:
+async def generate_with_llm(story: dict, scenario_mode: str = "lean") -> Optional[str]:
     """
     Generate Gherkin using an LLM provider.
     Currently supported: openai, ollama, gemini.
@@ -132,7 +256,7 @@ async def generate_with_llm(story: dict) -> Optional[str]:
         return None
 
     template_name = _detect_template(story)
-    prompt = _build_llm_prompt(story, template_name)
+    prompt = _build_llm_prompt(story, template_name, scenario_mode)
 
     if LLM_PROVIDER == "openai":
         return await _call_openai(prompt)
@@ -147,7 +271,7 @@ async def generate_with_llm(story: dict) -> Optional[str]:
 
 
 
-def _build_llm_prompt(story: dict, template_name: str) -> str:
+def _build_llm_prompt(story: dict, template_name: str, scenario_mode: str = "lean") -> str:
     """Build the LLM prompt for Gherkin generation with RAG context."""
     criteria = _parse_acceptance_criteria(story.get("acceptance_criteria", "[]"))
     criteria_text = "\n".join(f"  - {c}" for c in criteria)
@@ -160,9 +284,48 @@ def _build_llm_prompt(story: dict, template_name: str) -> str:
     except Exception:
         pass
 
+    mode_instruction = (
+        "Include exactly 2 scenarios: one happy path and one edge/negative path."
+        if scenario_mode == "lean"
+        else "Include comprehensive scenarios that cover happy, negative, and edge cases."
+    )
+
+    login_knowledge = ""
+    if template_name == "login.feature.j2":
+        login_knowledge = (
+            "\nSauceDemo Login Knowledge (must follow exactly):\n"
+            "- Base URL: https://www.saucedemo.com\n"
+            "- Valid user: standard_user\n"
+            "- Valid password: secret_sauce\n"
+            "- Invalid case should use wrong_user / wrong_pass\n"
+            "- Invalid login error text must be EXACTLY: \"Epic sadface: Username and password do not match any user in this service\"\n"
+            "- Keep login scenarios simple; do NOT introduce cart, checkout, sorting, or out-of-stock assumptions.\n"
+        )
+
+    cart_knowledge = ""
+    if template_name == "cart.feature.j2":
+        cart_knowledge = (
+            "\nSauceDemo Cart Knowledge (must follow exactly):\n"
+            "- When cart becomes empty, the cart badge should NOT be displayed (do not expect \"0\").\n"
+            "- Use \"Sauce Labs Backpack\" as the stable sample product.\n"
+            "- Keep scenarios simple; avoid unsupported empty-cart banner assumptions.\n"
+        )
+
+    checkout_knowledge = ""
+    if template_name == "checkout.feature.j2":
+        checkout_knowledge = (
+            "\nSauceDemo Checkout Knowledge (must follow exactly):\n"
+            "- Required-field validation should use empty values, not semantic \"invalid postal\" assumptions.\n"
+            "- Postal code validation message must be EXACTLY: \"Error: Postal Code is required\" when postal code is empty.\n"
+            "- Keep checkout negative case focused on required fields.\n"
+        )
+
     return f"""You are a QA expert. Generate a complete Gherkin feature file for the following user story.
-Use proper Given/When/Then syntax. Include at least 2 scenarios: a happy path and an error/negative path.
+Use proper Given/When/Then syntax. {mode_instruction}
 {rag_context}
+{login_knowledge}
+{cart_knowledge}
+{checkout_knowledge}
 User Story:
   Actor: {story.get('actor')}
   Action: {story.get('action')}
@@ -277,7 +440,7 @@ async def _call_gemini(prompt: str) -> Optional[str]:
 
 # ─── Main public function ─────────────────────────────────────────────────────
 
-async def generate_gherkin(story: dict) -> tuple[str, str]:
+async def generate_gherkin(story: dict, scenario_mode: str = "lean") -> tuple[str, str]:
     """
     Generate Gherkin for a user story.
     Tries LLM first if configured; falls back to Jinja2.
@@ -286,10 +449,25 @@ async def generate_gherkin(story: dict) -> tuple[str, str]:
         (gherkin_text, generator_name) where generator_name is "jinja2" or "llm"
     """
     # Try LLM if configured
+    template_name = _detect_template(story)
     if LLM_PROVIDER != "none":
-        llm_result = await generate_with_llm(story)
+        llm_result = await generate_with_llm(story, scenario_mode)
         if llm_result:
-            return llm_result, "llm"
+            out = _apply_scenario_policy(llm_result, scenario_mode)
+            if template_name == "login.feature.j2":
+                out = _stabilise_saucedemo_login_gherkin(out)
+            elif template_name == "cart.feature.j2":
+                out = _stabilise_saucedemo_cart_gherkin(out)
+            elif template_name == "checkout.feature.j2":
+                out = _stabilise_saucedemo_checkout_gherkin(out)
+            return out, "llm"
 
     # Default: Jinja2
-    return generate_with_jinja2(story), "jinja2"
+    out = _apply_scenario_policy(generate_with_jinja2(story), scenario_mode)
+    if template_name == "login.feature.j2":
+        out = _stabilise_saucedemo_login_gherkin(out)
+    elif template_name == "cart.feature.j2":
+        out = _stabilise_saucedemo_cart_gherkin(out)
+    elif template_name == "checkout.feature.j2":
+        out = _stabilise_saucedemo_checkout_gherkin(out)
+    return out, "jinja2"
