@@ -90,6 +90,11 @@ def _run_pytest_blocking(
         line = line.rstrip("\r\n")
         raw_lines.append(line)
 
+        # Stream the raw line to the dashboard's live log terminal. Without
+        # this the "Execution log streams here" panel never fills — the step
+        # events below only drive the per-test checklist, not the log box.
+        log_broker.publish_threadsafe(run_id, {"type": "log", "line": line})
+
         m = _SCENARIO_LINE.search(line)
         if m:
             log_broker.publish_threadsafe(run_id, {
@@ -269,6 +274,69 @@ def _safe_snap(pg) -> None:
         pass
 
 
+# Tracks the most recently created page so the makereport hook can grab a
+# final screenshot even for suites that bring their own context fixture.
+_LAST_ACTIVE_PAGE = {"pg": None}
+
+
+def _instrument_page(pg):
+    """Attach live-frame listeners to any page the suite creates."""
+    _LAST_ACTIVE_PAGE["pg"] = pg
+    try:
+        pg.on("load", lambda: _safe_snap(pg))
+        pg.on("framenavigated",
+              lambda frame: _safe_snap(pg) if frame == pg.main_frame else None)
+    except Exception:
+        pass
+    _safe_snap(pg)
+
+
+@pytest.fixture(autouse=True)
+def _instrument_playwright():
+    """Instrument EVERY Playwright page the suite opens, even when the
+    generated code rolls its own context fixture (browser_context.new_page())
+    instead of using our `page` fixture. Without this, self-contained suites
+    produce no live frames and no screenshots, so the dashboard preview and
+    screenshot grid stay empty. We monkeypatch page creation at the class
+    level and restore it after each test.
+    """
+    if sync_playwright is None:
+        yield
+        return
+    from playwright.sync_api import Browser, BrowserContext, Page
+
+    orig_ctx_new_page = BrowserContext.new_page
+    orig_browser_new_page = Browser.new_page
+    orig_close = Page.close
+
+    def ctx_new_page(self, *args, **kwargs):
+        pg = orig_ctx_new_page(self, *args, **kwargs)
+        _instrument_page(pg)
+        return pg
+
+    def browser_new_page(self, *args, **kwargs):
+        pg = orig_browser_new_page(self, *args, **kwargs)
+        _instrument_page(pg)
+        return pg
+
+    def snap_then_close(self, *args, **kwargs):
+        # The generated tests call page.close() as their last action; grab the
+        # final visible state first so the per-test screenshot isn't lost.
+        _safe_snap(self)
+        return orig_close(self, *args, **kwargs)
+
+    BrowserContext.new_page = ctx_new_page
+    Browser.new_page = browser_new_page
+    Page.close = snap_then_close
+    try:
+        yield
+    finally:
+        BrowserContext.new_page = orig_ctx_new_page
+        Browser.new_page = orig_browser_new_page
+        Page.close = orig_close
+        _LAST_ACTIVE_PAGE["pg"] = None
+
+
 @pytest.fixture(scope="session")
 def staging_url():
     return STAGING_URL
@@ -339,17 +407,41 @@ def pytest_runtest_makereport(item, call):
     # Final per-test screenshot, named after the test so the dashboard
     # screenshot grid can label it cleanly. Live frames live alongside
     # under the frame_<ms>.png naming convention.
+    dest = SCREENSHOTS_DIR / f"{item.name}.png"
+
+    # Path 1: a fixture-provided page/driver is still open (our own `page`
+    # fixture, or a Selenium driver).
     try:
         for fixture_name in ("page", "driver"):
             obj = item.funcargs.get(fixture_name)
             if obj is None:
                 continue
-            path = SCREENSHOTS_DIR / f"{item.name}.png"
             if fixture_name == "page":
-                obj.screenshot(path=str(path))
+                obj.screenshot(path=str(dest))
             else:
-                obj.save_screenshot(str(path))
-            break
+                obj.save_screenshot(str(dest))
+            return
+    except Exception:
+        pass
+
+    # Path 2: self-contained suite with its own context fixture. Its page was
+    # instrumented via monkeypatch; try the last active page if still open,
+    # otherwise reuse the newest live frame captured just before it closed.
+    try:
+        pg = _LAST_ACTIVE_PAGE.get("pg")
+        if pg is not None:
+            pg.screenshot(path=str(dest))
+            return
+    except Exception:
+        pass
+    try:
+        import shutil
+        frames = sorted(
+            SCREENSHOTS_DIR.glob("frame_*.png"),
+            key=lambda p: p.stat().st_mtime,
+        )
+        if frames:
+            shutil.copyfile(frames[-1], dest)
     except Exception:
         pass
 '''

@@ -692,11 +692,13 @@ async def get_test_run(
     if not row:
         raise HTTPException(status_code=404, detail="Run not found in this project")
 
-    # Scenarios are tracked per suite; scope by the execution's suite when present.
-    sc_query = select(TestRun).where(TestRun.project_id == project_id)
-    if row.suite_id:
-        sc_query = sc_query.where(TestRun.suite_id == row.suite_id)
-    sc_query = sc_query.order_by(TestRun.executed_at.asc())
+    # Scope scenarios to THIS execution. (Filtering by suite_id returned every
+    # prior run's rows too, so re-running showed duplicate scenarios.)
+    sc_query = (
+        select(TestRun)
+        .where(TestRun.execution_id == row.id)
+        .order_by(TestRun.executed_at.asc())
+    )
     scenarios = (await db.execute(sc_query)).scalars().all()
 
     base = _execution_out(row)

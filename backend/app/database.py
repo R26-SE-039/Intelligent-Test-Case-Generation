@@ -268,6 +268,23 @@ async def init_db():
         """))
 
         # ------------------------------------------------------------------
+        # Step 5.3: Link per-scenario test_runs rows to the execution that
+        # produced them. Without this, a run's detail view fell back to
+        # every row for the suite, so re-running N times showed N copies of
+        # each scenario. create_all() skips the pre-existing table, hence the
+        # explicit ALTER for legacy databases.
+        # ------------------------------------------------------------------
+        await conn.execute(text("""
+            ALTER TABLE test_runs
+                ADD COLUMN IF NOT EXISTS execution_id UUID
+                REFERENCES test_run_executions(id) ON DELETE CASCADE
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_test_runs_execution_id
+                ON test_runs (execution_id)
+        """))
+
+        # ------------------------------------------------------------------
         # Step 6: Fix stuck "processing" stories — mark as "done" if they
         # already have a Gherkin scenario generated.
         # ------------------------------------------------------------------
