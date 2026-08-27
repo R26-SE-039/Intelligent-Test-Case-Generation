@@ -421,10 +421,17 @@ async def get_project_traceability(
         scenario_query = select(TestRun).where(TestRun.project_id == project_id)
         scenario_rows = (await db.execute(scenario_query.order_by(TestRun.executed_at.asc()))).scalars().all()
 
-    scenarios_by_suite: dict[str, list[TestRun]] = {}
+    # Group per execution — grouping by suite_id gave every execution the
+    # suite's ENTIRE scenario history, so one old failure showed as failing
+    # in every later run. Rows predating the execution_id column fall back
+    # to suite grouping so they aren't dropped from the audit trail.
+    scenarios_by_execution: dict[str, list[TestRun]] = {}
+    legacy_by_suite: dict[str, list[TestRun]] = {}
     for row in scenario_rows:
-        if row.suite_id:
-            scenarios_by_suite.setdefault(str(row.suite_id), []).append(row)
+        if row.execution_id:
+            scenarios_by_execution.setdefault(str(row.execution_id), []).append(row)
+        elif row.suite_id:
+            legacy_by_suite.setdefault(str(row.suite_id), []).append(row)
 
     stories = [
         TraceabilityStoryOut(
@@ -509,7 +516,10 @@ async def get_project_traceability(
                     error_message=scenario.error_message,
                     executed_at=scenario.executed_at.isoformat() if scenario.executed_at else None,
                 )
-                for scenario in scenarios_by_suite.get(str(row.suite_id), [])
+                for scenario in (
+                    scenarios_by_execution.get(str(row.id))
+                    or legacy_by_suite.get(str(row.suite_id), [])
+                )
             ],
         )
         for row in execution_rows
