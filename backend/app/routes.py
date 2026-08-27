@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from typing import Literal, Optional
 import hashlib
 import json
+import logging
 import re
 import uuid
 
@@ -34,8 +35,11 @@ from app.database import get_db
 from app.models import Project, UserStory, GherkinScenario, TestSuite, DomElement, Priority, Status
 from app.gherkin.generator import generate_gherkin
 from app.code_gen.generator import generate_test_suite
+from app.code_gen.sanitizer import sanitize_generated_suite
 from app.dom_crawler import crawl_url, probe_url, build_auth_plan, AuthPlan, log_broker
 from app.ml.predict import predict_for_project
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["pipeline"])
 
@@ -819,6 +823,19 @@ async def generate_code(
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to generate code for {framework}: LLM returned None",
+            )
+
+        # Deterministic guardrail: repair fatal anti-patterns the LLM keeps
+        # re-introducing despite prompt rules (e.g. duplicate add-to-cart click).
+        generated_code, applied_fixes = sanitize_generated_suite(
+            generated_code, framework=framework, url=body.url
+        )
+        if applied_fixes:
+            logger.info(
+                "Sanitizer repaired %s suite for project %s: %s",
+                framework,
+                body.project_id,
+                "; ".join(applied_fixes),
             )
 
         language, filename = _framework_meta(framework)

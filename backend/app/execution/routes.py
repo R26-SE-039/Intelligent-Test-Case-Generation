@@ -232,9 +232,11 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
     if not row:
         raise HTTPException(status_code=404, detail="Run not found")
 
+    # Scope to THIS execution's scenarios. (Filtering by suite_id returned
+    # every prior run's rows too, so re-running showed duplicate scenarios.)
     sc_q = await db.execute(
         select(TestRun)
-        .where(TestRun.suite_id == row.suite_id)
+        .where(TestRun.execution_id == row.id)
         .order_by(TestRun.executed_at.asc())
     )
     scenarios = sc_q.scalars().all()

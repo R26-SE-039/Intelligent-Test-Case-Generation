@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.database import get_db
 from app.models import GherkinScenario, Project, TestRun, TestRunExecution, TestSuite, DomElement, UserStory
@@ -357,6 +358,7 @@ def _status_result(status: str) -> str:
 async def get_project_traceability(
     project_id: str,
     iteration_id: Optional[str] = None,
+    light: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
     """Return the complete story-to-execution view needed by C3 and RTM.
@@ -364,6 +366,11 @@ async def get_project_traceability(
     The response is assembled from C2's normalized tables. Iterations remain
     owned by the auth service; C2 returns the iteration UUID stored on each
     imported story as a cross-service reference.
+
+    `light=true` (used by RTM's matrix) skips the heavy columns — suite source
+    code, raw execution logs, artifacts — at the SQL level. Traceability ids,
+    gherkin texts, and scenario results are unaffected. Default stays full so
+    C3's healing pipeline keeps its complete payload.
     """
     project_result = await db.execute(select(Project).where(Project.id == project_id))
     project = project_result.scalar_one_or_none()
@@ -386,19 +393,24 @@ async def get_project_traceability(
     for row in gherkin_rows:
         gherkin_by_story.setdefault(row.story_id, []).append(row)
 
-    suite_rows = (
-        await db.execute(
-            select(TestSuite)
-            .where(TestSuite.project_id == project_id)
-            .order_by(TestSuite.framework.asc(), TestSuite.version.desc())
-        )
-    ).scalars().all()
+    suite_query = (
+        select(TestSuite)
+        .where(TestSuite.project_id == project_id)
+        .order_by(TestSuite.framework.asc(), TestSuite.version.desc())
+    )
+    if light:
+        suite_query = suite_query.options(defer(TestSuite.code))
+    suite_rows = (await db.execute(suite_query)).scalars().all()
 
     execution_query = (
         select(TestRunExecution)
         .where(TestRunExecution.project_id == project_id)
         .order_by(TestRunExecution.started_at.desc())
     )
+    if light:
+        execution_query = execution_query.options(
+            defer(TestRunExecution.raw_log_text), defer(TestRunExecution.artifacts_json)
+        )
     execution_rows = (await db.execute(execution_query)).scalars().all()
 
     scenario_rows: list[TestRun] = []
@@ -409,10 +421,17 @@ async def get_project_traceability(
         scenario_query = select(TestRun).where(TestRun.project_id == project_id)
         scenario_rows = (await db.execute(scenario_query.order_by(TestRun.executed_at.asc()))).scalars().all()
 
-    scenarios_by_suite: dict[str, list[TestRun]] = {}
+    # Group per execution — grouping by suite_id gave every execution the
+    # suite's ENTIRE scenario history, so one old failure showed as failing
+    # in every later run. Rows predating the execution_id column fall back
+    # to suite grouping so they aren't dropped from the audit trail.
+    scenarios_by_execution: dict[str, list[TestRun]] = {}
+    legacy_by_suite: dict[str, list[TestRun]] = {}
     for row in scenario_rows:
-        if row.suite_id:
-            scenarios_by_suite.setdefault(str(row.suite_id), []).append(row)
+        if row.execution_id:
+            scenarios_by_execution.setdefault(str(row.execution_id), []).append(row)
+        elif row.suite_id:
+            legacy_by_suite.setdefault(str(row.suite_id), []).append(row)
 
     stories = [
         TraceabilityStoryOut(
@@ -453,7 +472,7 @@ async def get_project_traceability(
             framework=row.framework,
             language=row.language,
             filename=row.filename,
-            code=row.code,
+            code="" if light else row.code,
             mode=row.mode,
             url=row.url,
             version=row.version,
@@ -485,8 +504,8 @@ async def get_project_traceability(
             passed_count=row.passed_count or 0,
             failed_count=row.failed_count or 0,
             error_message=row.error_message,
-            raw_log=row.raw_log_text,
-            artifacts=row.artifacts_json or {},
+            raw_log=None if light else row.raw_log_text,
+            artifacts={} if light else (row.artifacts_json or {}),
             scenario_results=[
                 TraceabilityScenarioResultOut(
                     test_run_id=str(scenario.id),
@@ -497,7 +516,10 @@ async def get_project_traceability(
                     error_message=scenario.error_message,
                     executed_at=scenario.executed_at.isoformat() if scenario.executed_at else None,
                 )
-                for scenario in scenarios_by_suite.get(str(row.suite_id), [])
+                for scenario in (
+                    scenarios_by_execution.get(str(row.id))
+                    or legacy_by_suite.get(str(row.suite_id), [])
+                )
             ],
         )
         for row in execution_rows
@@ -692,11 +714,13 @@ async def get_test_run(
     if not row:
         raise HTTPException(status_code=404, detail="Run not found in this project")
 
-    # Scenarios are tracked per suite; scope by the execution's suite when present.
-    sc_query = select(TestRun).where(TestRun.project_id == project_id)
-    if row.suite_id:
-        sc_query = sc_query.where(TestRun.suite_id == row.suite_id)
-    sc_query = sc_query.order_by(TestRun.executed_at.asc())
+    # Scope scenarios to THIS execution. (Filtering by suite_id returned every
+    # prior run's rows too, so re-running showed duplicate scenarios.)
+    sc_query = (
+        select(TestRun)
+        .where(TestRun.execution_id == row.id)
+        .order_by(TestRun.executed_at.asc())
+    )
     scenarios = (await db.execute(sc_query)).scalars().all()
 
     base = _execution_out(row)

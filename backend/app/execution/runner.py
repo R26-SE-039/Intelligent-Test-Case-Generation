@@ -433,6 +433,7 @@ async def _persist_scenarios(
             id=uuid.uuid4(),
             project_id=row.project_id,
             suite_id=suite.id,
+            execution_id=row.id,
             scenario_name=sc.name,
             flow_name=_flow_name_for(sc.name),
             framework=suite.framework,

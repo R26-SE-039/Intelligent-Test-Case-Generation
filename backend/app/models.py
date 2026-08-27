@@ -218,6 +218,15 @@ class TestRun(Base):
         ForeignKey("test_suites.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Links this scenario row back to the specific execution that produced it,
+    # so a run's detail view shows only its own scenarios. Nullable because the
+    # table is also a cross-run ML history (and legacy rows predate this column).
+    execution_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("test_run_executions.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     scenario_name = Column(String(255), nullable=False)
     flow_name = Column(String(64), nullable=False, index=True)
     framework = Column(String(40), nullable=False)
