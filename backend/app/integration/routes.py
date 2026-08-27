@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.database import get_db
 from app.models import GherkinScenario, Project, TestRun, TestRunExecution, TestSuite, DomElement, UserStory
@@ -357,6 +358,7 @@ def _status_result(status: str) -> str:
 async def get_project_traceability(
     project_id: str,
     iteration_id: Optional[str] = None,
+    light: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
     """Return the complete story-to-execution view needed by C3 and RTM.
@@ -364,6 +366,11 @@ async def get_project_traceability(
     The response is assembled from C2's normalized tables. Iterations remain
     owned by the auth service; C2 returns the iteration UUID stored on each
     imported story as a cross-service reference.
+
+    `light=true` (used by RTM's matrix) skips the heavy columns — suite source
+    code, raw execution logs, artifacts — at the SQL level. Traceability ids,
+    gherkin texts, and scenario results are unaffected. Default stays full so
+    C3's healing pipeline keeps its complete payload.
     """
     project_result = await db.execute(select(Project).where(Project.id == project_id))
     project = project_result.scalar_one_or_none()
@@ -386,19 +393,24 @@ async def get_project_traceability(
     for row in gherkin_rows:
         gherkin_by_story.setdefault(row.story_id, []).append(row)
 
-    suite_rows = (
-        await db.execute(
-            select(TestSuite)
-            .where(TestSuite.project_id == project_id)
-            .order_by(TestSuite.framework.asc(), TestSuite.version.desc())
-        )
-    ).scalars().all()
+    suite_query = (
+        select(TestSuite)
+        .where(TestSuite.project_id == project_id)
+        .order_by(TestSuite.framework.asc(), TestSuite.version.desc())
+    )
+    if light:
+        suite_query = suite_query.options(defer(TestSuite.code))
+    suite_rows = (await db.execute(suite_query)).scalars().all()
 
     execution_query = (
         select(TestRunExecution)
         .where(TestRunExecution.project_id == project_id)
         .order_by(TestRunExecution.started_at.desc())
     )
+    if light:
+        execution_query = execution_query.options(
+            defer(TestRunExecution.raw_log_text), defer(TestRunExecution.artifacts_json)
+        )
     execution_rows = (await db.execute(execution_query)).scalars().all()
 
     scenario_rows: list[TestRun] = []
@@ -453,7 +465,7 @@ async def get_project_traceability(
             framework=row.framework,
             language=row.language,
             filename=row.filename,
-            code=row.code,
+            code="" if light else row.code,
             mode=row.mode,
             url=row.url,
             version=row.version,
@@ -485,8 +497,8 @@ async def get_project_traceability(
             passed_count=row.passed_count or 0,
             failed_count=row.failed_count or 0,
             error_message=row.error_message,
-            raw_log=row.raw_log_text,
-            artifacts=row.artifacts_json or {},
+            raw_log=None if light else row.raw_log_text,
+            artifacts={} if light else (row.artifacts_json or {}),
             scenario_results=[
                 TraceabilityScenarioResultOut(
                     test_run_id=str(scenario.id),
