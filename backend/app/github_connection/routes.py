@@ -7,16 +7,19 @@ POST  /api/v1/projects/{pid}/github/connect           — save token + repo, ins
 POST  /api/v1/projects/{pid}/github/reinstall-workflow — re-PUT the YAML (used after conflict)
 POST  /api/v1/projects/{pid}/github/test-ping         — smoke check using the stored token
 DELETE /api/v1/projects/{pid}/github/connection       — disconnect (deletes row)
+GET   /api/v1/projects/{pid}/github/credentials       — internal (RTM): decrypted token + repo
 """
 
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +28,7 @@ from app.database import get_db
 from app.models import Project, ProjectGitHubConnection
 
 from .crypto import decrypt_token, encrypt_token, mask_token
+from .store import load_connection
 from .workflow_installer import (
     GITHUB_API,
     install_workflow,
@@ -96,6 +100,16 @@ class PingResponse(BaseModel):
     rate_limit_remaining: Optional[int] = None
     workflow_present: bool = False
     detail: Optional[str] = None
+
+
+class CredentialsOut(BaseModel):
+    """Internal-only payload: the decrypted PAT for service-to-service use."""
+    project_id: str
+    owner: str
+    repo: str
+    repo_full: str
+    default_branch: str
+    token: str
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -195,6 +209,39 @@ async def get_connection(project_id: str, db: AsyncSession = Depends(get_db)):
     )
     row = q.scalar_one_or_none()
     return _connection_out(row) if row else None
+
+
+@router.get("/projects/{project_id}/github/credentials", response_model=CredentialsOut)
+async def get_credentials(
+    project_id: str,
+    x_internal_key: Optional[str] = Header(default=None, alias="X-Internal-Key"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Internal service-to-service endpoint (consumed by the RTM backend's code
+    coverage runner, which needs a clone-capable token). Returns the DECRYPTED
+    PAT, so it is gated on a shared secret: the caller must send X-Internal-Key
+    matching env NEXTGENQA_INTERNAL_KEY. Disabled entirely (503) when the env
+    var is unset. Never expose this through the public frontend.
+    """
+    expected = os.getenv("NEXTGENQA_INTERNAL_KEY", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Internal API disabled (NEXTGENQA_INTERNAL_KEY not set)")
+    if not x_internal_key or not hmac.compare_digest(x_internal_key, expected):
+        raise HTTPException(status_code=403, detail="Invalid internal key")
+
+    await _ensure_project(db, project_id)
+    record = await load_connection(project_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No GitHub connection for this project")
+    return CredentialsOut(
+        project_id=record.project_id,
+        owner=record.owner,
+        repo=record.repo,
+        repo_full=record.repo_full,
+        default_branch=record.default_branch,
+        token=record.token,
+    )
 
 
 @router.post("/projects/{project_id}/github/connect", response_model=ConnectResponse)
