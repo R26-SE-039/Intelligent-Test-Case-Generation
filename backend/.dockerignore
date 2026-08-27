@@ -1,10 +1,10 @@
 .venv
+venv
 __pycache__
 *.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-allure-results/
 .env
-Dockerfile
-.dockerignore
+.env.*
+.git
+.gitignore
+*.md
+tests
