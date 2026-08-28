@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 
 # Playwright spawns the browser via asyncio subprocess transport, which
@@ -58,6 +59,11 @@ app = FastAPI(
     version="0.2.0",
     contact={"name": "NextGenQA — Component 2 (Test Case Generation)"},
     license_info={"name": "SLIIT Research Project R26-SE-039"},
+    # When served publicly behind Caddy at /testcase-docs (which strips the
+    # prefix before forwarding), ROOT_PATH=/testcase-docs makes Swagger UI load
+    # its spec from /testcase-docs/openapi.json. Empty locally, so :8002/docs
+    # still works unchanged. It does NOT affect request routing.
+    root_path=os.getenv("ROOT_PATH", ""),
     lifespan=lifespan,
 )
 
