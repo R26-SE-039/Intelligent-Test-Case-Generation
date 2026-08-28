@@ -1,10 +1,12 @@
 name: deploy
-# Auto-deploy to the NextGenQA EC2 box on push to the deploy branch.
-# Runs on the self-hosted runner ON the box (no inbound SSH). The code is
-# fetched via actions/checkout using the ephemeral GITHUB_TOKEN — so NO
-# personal access token needs to live on the box, and revoking any PAT can't
-# break this. rsync copies the checked-out code into the deployed folder
-# (preserving the gitignored .env files), then only this service is rebuilt.
+# CI/CD for C2 (Intelligent Test Case Generation) on the NextGenQA EC2 box.
+# Two jobs run on the self-hosted runner (no inbound SSH). Code is fetched with
+# actions/checkout (ephemeral GITHUB_TOKEN — no PAT on the box) and rsync'd into
+# the deploy folder (gitignored .env preserved).
+#
+#   test   → builds the image and runs unit + integration tests INSIDE it.
+#   deploy → runs ONLY if `test` passes (needs: test); rebuilds (cache hit) and
+#            switches traffic to the new container.
 on:
   push:
     branches: [feature/aws-deploy]
@@ -15,7 +17,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  test:
+    name: test
     runs-on: [self-hosted, nextgenqa]
     steps:
       - name: Check out the pushed code
@@ -34,12 +37,10 @@ jobs:
           cd ~/deploy
           docker compose -f docker-compose.prod.yml --env-file .env build test-case
 
-      # ── Deploy gate: run unit + integration tests INSIDE the freshly built
-      # image before switching traffic to it. tests/ is bind-mounted (kept out
-      # of the production image), --no-deps avoids starting auth/db, and the
-      # suite is hermetic (no DB/network). A non-zero exit fails the job here,
-      # so the running container is left untouched.
-      - name: Run unit + integration tests (deploy gate)
+      # tests/ is bind-mounted (kept out of the prod image), --no-deps avoids
+      # starting auth/db, and the suite is hermetic (no DB/network). A failing
+      # test exits non-zero → this job fails → `deploy` is skipped.
+      - name: Run unit + integration tests
         run: |
           set -euo pipefail
           cd ~/deploy
@@ -48,11 +49,26 @@ jobs:
             -v "$HOME/Intelligent-Test-Case-Generation/backend/pytest.ini:/app/pytest.ini:ro" \
             --entrypoint sh test-case -c "cd /app && python -m pytest tests -q"
 
-      - name: Deploy (only if tests passed)
+  deploy:
+    name: deploy
+    needs: test
+    runs-on: [self-hosted, nextgenqa]
+    steps:
+      - name: Check out the pushed code
+        uses: actions/checkout@v4
+        with:
+          ref: feature/aws-deploy
+
+      - name: Sync code into the deploy folder
+        run: |
+          set -euo pipefail
+          rsync -a --exclude='.git/' --exclude='.env' --exclude='backend/.env' --exclude='repair-agent/.env' ./ ~/Intelligent-Test-Case-Generation/
+
+      - name: Rebuild & restart the service
         run: |
           set -euo pipefail
           cd ~/deploy
-          docker compose -f docker-compose.prod.yml --env-file .env up -d test-case
+          docker compose -f docker-compose.prod.yml --env-file .env up -d --build test-case
 
       - name: Prune dangling images
         run: docker image prune -f
