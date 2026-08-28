@@ -45,8 +45,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="NextGen QA Component 2 — Intelligent Test Case Generation",
-    description="AI-powered Gherkin + Multi-Framework Code Generation with CI/CD Integration",
+    summary="AI-powered Gherkin + multi-framework test-code generation with CI/CD integration.",
+    description=(
+        "REST + WebSocket API for Component 2 of the NextGenQA platform.\n\n"
+        "**Pipeline:** user stories → Gherkin scenarios → executable test code "
+        "(Playwright / Selenium / …) → DOM crawl → execution → results.\n\n"
+        "### Interactive docs\n"
+        "- **Swagger UI:** `/docs`\n"
+        "- **ReDoc:** `/redoc`\n"
+        "- **OpenAPI spec:** `/openapi.json`\n"
+    ),
     version="0.2.0",
+    contact={"name": "NextGenQA — Component 2 (Test Case Generation)"},
+    license_info={"name": "SLIIT Research Project R26-SE-039"},
     lifespan=lifespan,
 )
 

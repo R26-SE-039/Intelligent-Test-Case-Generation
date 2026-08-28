@@ -28,11 +28,31 @@ jobs:
           set -euo pipefail
           rsync -a --exclude='.git/' --exclude='.env' --exclude='backend/.env' --exclude='repair-agent/.env' ./ ~/Intelligent-Test-Case-Generation/
 
-      - name: Rebuild & restart the service
+      - name: Build the image
         run: |
           set -euo pipefail
           cd ~/deploy
-          docker compose -f docker-compose.prod.yml --env-file .env up -d --build test-case
+          docker compose -f docker-compose.prod.yml --env-file .env build test-case
+
+      # ── Deploy gate: run unit + integration tests INSIDE the freshly built
+      # image before switching traffic to it. tests/ is bind-mounted (kept out
+      # of the production image), --no-deps avoids starting auth/db, and the
+      # suite is hermetic (no DB/network). A non-zero exit fails the job here,
+      # so the running container is left untouched.
+      - name: Run unit + integration tests (deploy gate)
+        run: |
+          set -euo pipefail
+          cd ~/deploy
+          docker compose -f docker-compose.prod.yml --env-file .env run --rm --no-deps \
+            -v "$HOME/Intelligent-Test-Case-Generation/backend/tests:/app/tests:ro" \
+            -v "$HOME/Intelligent-Test-Case-Generation/backend/pytest.ini:/app/pytest.ini:ro" \
+            --entrypoint sh test-case -c "cd /app && python -m pytest tests -q"
+
+      - name: Deploy (only if tests passed)
+        run: |
+          set -euo pipefail
+          cd ~/deploy
+          docker compose -f docker-compose.prod.yml --env-file .env up -d test-case
 
       - name: Prune dangling images
         run: docker image prune -f
