@@ -2,218 +2,169 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>NextGen QA · Run {{ run.id }}</title>
+  <title>NextGen QA · Test Execution Report · {{ run.id }}</title>
   <style>
-    @page { size: A4; margin: 0; }
-    * { box-sizing: border-box; }
+    @page { size: A4; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      color: #0f172a;
-      background: #fff;
+      color: #0f172a; font-size: 10.5pt; line-height: 1.5;
     }
-    .page {
-      width: 210mm;
-      min-height: 297mm;
-      padding: 18mm 16mm;
-      page-break-after: always;
+    h1 { font-size: 22pt; margin: 0 0 2pt; letter-spacing: -0.4pt; }
+    h2 { font-size: 13pt; margin: 22pt 0 10pt; }
+    .muted { color: #64748b; }
+    .break { page-break-before: always; }
+    code {
+      font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: 9pt;
+      background: #f1f5f9; padding: 1pt 5pt; border-radius: 3pt;
     }
-    .page:last-child { page-break-after: auto; }
 
-    h1 { font-size: 26pt; margin: 0 0 4pt; letter-spacing: -0.5pt; }
-    h2 { font-size: 14pt; margin: 24pt 0 8pt; padding-bottom: 4pt; border-bottom: 1px solid #e2e8f0; }
-    h3 { font-size: 11pt; margin: 12pt 0 6pt; color: #334155; }
-    p, li { font-size: 10.5pt; line-height: 1.55; color: #1e293b; }
-    small, .meta { color: #64748b; font-size: 9pt; }
-
-    /* Cover */
-    .cover-header {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 36pt;
+    /* Title band */
+    .titlebar {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      padding-bottom: 14pt; border-bottom: 2px solid #4f46e5; margin-bottom: 18pt;
     }
-    .brand {
-      display: inline-flex; gap: 10pt; align-items: center;
-      padding: 8pt 14pt;
-      border-radius: 999pt;
-      background: linear-gradient(135deg, #7c3aed, #4f46e5);
-      color: white; font-weight: 600; font-size: 11pt;
+    .kicker {
+      font-size: 8.5pt; font-weight: 700; letter-spacing: 1pt;
+      text-transform: uppercase; color: #4f46e5;
     }
+    .sub { color: #64748b; font-size: 9.5pt; margin-top: 6pt; }
     .status-pill {
-      display: inline-block;
-      padding: 6pt 14pt;
-      border-radius: 999pt;
-      font-weight: 700; font-size: 11pt;
-      letter-spacing: 0.5pt;
+      display: inline-block; padding: 6pt 16pt; border-radius: 999pt;
+      font-weight: 700; font-size: 10pt; letter-spacing: 0.5pt; white-space: nowrap;
     }
     .status-passed { background: #d1fae5; color: #065f46; }
     .status-failed { background: #fee2e2; color: #991b1b; }
     .status-error  { background: #fef3c7; color: #92400e; }
 
-    .summary-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 14pt;
-      margin: 18pt 0 24pt;
-    }
-    .summary-tile {
-      border: 1px solid #e2e8f0;
-      border-radius: 10pt;
-      padding: 14pt 16pt;
-      background: #f8fafc;
-    }
-    .summary-tile .v { font-size: 22pt; font-weight: 700; color: #0f172a; }
-    .summary-tile .l { font-size: 9pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.5pt; }
+    /* Summary tiles */
+    .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10pt; margin: 16pt 0; }
+    .tile { border: 1px solid #e2e8f0; border-radius: 10pt; padding: 12pt 14pt; }
+    .tile .v { font-size: 20pt; font-weight: 700; }
+    .tile .l { font-size: 8pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.5pt; margin-top: 2pt; }
+    .tile.accent { background: #eef2ff; border-color: #c7d2fe; }
 
-    /* Donut */
-    .chart-wrap {
-      display: flex; align-items: center; gap: 24pt;
-      margin: 20pt 0;
-      padding: 18pt;
-      border: 1px solid #e2e8f0;
-      border-radius: 12pt;
-      background: #f8fafc;
-    }
-    .donut { position: relative; width: 120pt; height: 120pt; flex-shrink: 0; }
+    /* Donut + legend */
+    .cols { display: grid; grid-template-columns: 190pt 1fr; gap: 24pt; align-items: center; margin: 6pt 0; }
+    .donut { position: relative; width: 150pt; height: 150pt; margin: auto; }
     .donut svg { transform: rotate(-90deg); }
     .donut .pct {
-      position: absolute; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 20pt; font-weight: 700; color: #0f172a;
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
     }
-    .legend { font-size: 10pt; color: #334155; }
-    .legend .row { display: flex; align-items: center; gap: 6pt; margin: 3pt 0; }
-    .legend .sw { width: 9pt; height: 9pt; border-radius: 2pt; }
+    .donut .pct .n { font-size: 26pt; font-weight: 700; }
+    .donut .pct .t { font-size: 8pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.5pt; }
+    .legend .row { display: flex; align-items: center; gap: 8pt; margin: 6pt 0; font-size: 10.5pt; }
+    .legend .sw { width: 10pt; height: 10pt; border-radius: 3pt; flex-shrink: 0; }
 
-    table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-top: 8pt; }
-    th, td { text-align: left; padding: 6pt 8pt; border-bottom: 1px solid #f1f5f9; }
-    th { color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4pt; font-size: 8.5pt; }
-    .ok { color: #065f46; font-weight: 600; }
-    .bad { color: #991b1b; font-weight: 600; }
+    /* Metadata table */
+    .kv { width: 100%; border-collapse: collapse; font-size: 10pt; margin-top: 4pt; }
+    .kv td { padding: 6pt 0; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .kv td.k { color: #64748b; width: 150pt; }
 
-    .screenshots {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; margin-top: 10pt;
-    }
-    .shot { border: 1px solid #e2e8f0; border-radius: 6pt; overflow: hidden; }
+    /* Screenshots */
+    .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 12pt; margin-top: 6pt; }
+    .shot { border: 1px solid #e2e8f0; border-radius: 8pt; overflow: hidden; page-break-inside: avoid; }
     .shot.failed { border-color: #fecaca; }
-    .shot img { width: 100%; height: 90pt; object-fit: cover; display: block; background: #f8fafc; }
-    .shot .cap { padding: 4pt 8pt; font-size: 8.5pt; display: flex; justify-content: space-between; }
-    .shot .cap .name { color: #334155; }
+    .shot img { width: 100%; height: 110pt; object-fit: cover; display: block; background: #f8fafc; }
+    .shot .cap { padding: 5pt 9pt; font-size: 8.5pt; display: flex; justify-content: space-between; align-items: center; }
+    .badge { font-size: 7.5pt; font-weight: 700; padding: 2pt 8pt; border-radius: 999pt; text-transform: uppercase; letter-spacing: 0.3pt; }
+    .badge.ok  { background: #d1fae5; color: #065f46; }
+    .badge.bad { background: #fee2e2; color: #991b1b; }
 
-    .kv { display: grid; grid-template-columns: 130pt 1fr; gap: 4pt 12pt; font-size: 10pt; }
-    .kv dt { color: #64748b; }
-    .kv dd { margin: 0; color: #0f172a; }
-
-    .footer {
-      margin-top: 28pt; padding-top: 10pt;
-      border-top: 1px solid #e2e8f0;
-      font-size: 8.5pt; color: #94a3b8;
-      display: flex; justify-content: space-between;
+    pre.log {
+      background: #0f172a; color: #e2e8f0; padding: 12pt 14pt; border-radius: 8pt;
+      font-family: "JetBrains Mono", Menlo, monospace; font-size: 8pt; line-height: 1.55;
+      white-space: pre-wrap; word-break: break-all; margin-top: 6pt;
     }
-
-    code { font-family: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace; font-size: 9pt; background: #f1f5f9; padding: 1pt 4pt; border-radius: 3pt; }
   </style>
 </head>
 <body>
 
-  {# ── Page 1: Cover & summary ─────────────────────────────────────────── #}
-  <div class="page">
-    <div class="cover-header">
-      <span class="brand">NextGen QA · Component 2</span>
+  {# ── Summary ─────────────────────────────────────────────────────────── #}
+  <section>
+    <div class="titlebar">
+      <div>
+        <div class="kicker">NextGen QA · Component 2 · Intelligent Test Case Generation</div>
+        <h1>Test Execution Report</h1>
+        <div class="sub">Run <code>{{ run.id }}</code> &middot; {{ run.framework }} &middot; {{ run.mode }} mode</div>
+      </div>
       <span class="status-pill status-{{ run.status }}">{{ run.status|upper }}</span>
     </div>
 
-    <h1>Test Execution Report</h1>
-    <p class="meta">
-      Run <code>{{ run.id }}</code> ·
-      Framework <strong>{{ run.framework }}</strong> ·
-      Mode <strong>{{ run.mode }}</strong>
-    </p>
-
-    <div class="summary-grid">
-      <div class="summary-tile"><div class="v">{{ run.total_count }}</div><div class="l">Total Scenarios</div></div>
-      <div class="summary-tile"><div class="v" style="color:#059669;">{{ run.passed_count }}</div><div class="l">Passed</div></div>
-      <div class="summary-tile"><div class="v" style="color:#dc2626;">{{ run.failed_count }}</div><div class="l">Failed</div></div>
+    <div class="tiles">
+      <div class="tile accent"><div class="v" style="color:#4f46e5;">{{ pass_pct }}%</div><div class="l">Pass Rate</div></div>
+      <div class="tile"><div class="v">{{ run.total_count }}</div><div class="l">Total Scenarios</div></div>
+      <div class="tile"><div class="v" style="color:#059669;">{{ run.passed_count }}</div><div class="l">Passed</div></div>
+      <div class="tile"><div class="v" style="color:#dc2626;">{{ run.failed_count }}</div><div class="l">Failed</div></div>
     </div>
 
-    <div class="chart-wrap">
+    <div class="cols">
       <div class="donut">
-        {% set radius = 50 %}
+        {% set radius = 62 %}
         {% set circ = 2 * 3.14159 * radius %}
         {% set passed_arc = circ * (run.passed_count / (run.total_count if run.total_count else 1)) %}
-        <svg width="120" height="120" viewBox="0 0 120 120">
-          <circle cx="60" cy="60" r="{{ radius }}" stroke="#fee2e2" stroke-width="14" fill="none" />
-          <circle cx="60" cy="60" r="{{ radius }}"
-                  stroke="#10b981" stroke-width="14" fill="none"
-                  stroke-dasharray="{{ passed_arc }} {{ circ }}"
-                  stroke-linecap="butt" />
+        <svg width="150" height="150" viewBox="0 0 150 150">
+          <circle cx="75" cy="75" r="{{ radius }}" stroke="#fee2e2" stroke-width="16" fill="none" />
+          <circle cx="75" cy="75" r="{{ radius }}" stroke="#10b981" stroke-width="16" fill="none"
+                  stroke-dasharray="{{ passed_arc }} {{ circ }}" stroke-linecap="round" />
         </svg>
-        <div class="pct">{{ pass_pct }}%</div>
+        <div class="pct"><span class="n">{{ pass_pct }}%</span><span class="t">Passed</span></div>
       </div>
       <div class="legend">
-        <div class="row"><span class="sw" style="background:#10b981"></span>Passed · {{ run.passed_count }}</div>
-        <div class="row"><span class="sw" style="background:#ef4444"></span>Failed · {{ run.failed_count }}</div>
-        <div class="row"><span class="sw" style="background:#cbd5e1"></span>Duration · {{ run.duration_ms|fdur }}</div>
-        {% if run.github_run_url %}
-        <div class="row meta">GitHub run · {{ run.github_run_url }}</div>
-        {% endif %}
+        <div class="row"><span class="sw" style="background:#10b981"></span><strong>{{ run.passed_count }}</strong>&nbsp;Passed scenarios</div>
+        <div class="row"><span class="sw" style="background:#ef4444"></span><strong>{{ run.failed_count }}</strong>&nbsp;Failed scenarios</div>
+        <div class="row"><span class="sw" style="background:#cbd5e1"></span><strong>{{ run.duration_ms|fdur }}</strong>&nbsp;Total duration</div>
       </div>
     </div>
 
     <h2>Pipeline Metadata</h2>
-    <dl class="kv">
-      <dt>Project ID</dt><dd><code>{{ run.project_id }}</code></dd>
+    <table class="kv">
+      <tr><td class="k">Project ID</td><td><code>{{ run.project_id }}</code></td></tr>
       {% if suite %}
-        <dt>Suite</dt><dd>{{ suite.filename }} (v{{ suite.version }})</dd>
-        <dt>Generation Mode</dt><dd>{{ "B · DOM-Aware" if suite.mode == "dom" else "A · Abstract" }}</dd>
-        <dt>Staging URL</dt><dd><code>{{ suite.url }}</code></dd>
+      <tr><td class="k">Test Suite</td><td>{{ suite.filename }} &middot; version {{ suite.version }}</td></tr>
+      <tr><td class="k">Generation Mode</td><td>{{ "Mode B — DOM-Aware" if suite.mode == "dom" else "Mode A — Abstract" }}</td></tr>
+      <tr><td class="k">Target URL</td><td><code>{{ suite.url }}</code></td></tr>
       {% endif %}
-      <dt>Started</dt><dd>{{ run.started_at|fdt }}</dd>
-      <dt>Finished</dt><dd>{{ run.finished_at|fdt }}</dd>
-      <dt>Execution Mode</dt><dd>{{ run.mode }}{% if run.github_branch %} ({{ run.github_branch }}){% endif %}</dd>
-    </dl>
+      <tr><td class="k">Framework</td><td>{{ run.framework }}</td></tr>
+      <tr><td class="k">Execution Mode</td><td>{{ run.mode }}{% if run.github_branch %} &middot; {{ run.github_branch }}{% endif %}</td></tr>
+      <tr><td class="k">Started</td><td>{{ run.started_at|fdt }}</td></tr>
+      <tr><td class="k">Finished</td><td>{{ run.finished_at|fdt }}</td></tr>
+      {% if run.github_run_url %}
+      <tr><td class="k">CI Run</td><td><code>{{ run.github_run_url }}</code></td></tr>
+      {% endif %}
+    </table>
+  </section>
 
-    <div class="footer">
-      <span>Generated {{ generated_at|fdt }}</span>
-      <span>R26-SE-039 · SLIIT Faculty of Computing</span>
-    </div>
-  </div>
-
-  {# ── Page 2: Screenshots ─────────────────────────────────────────── #}
+  {# ── Screenshots ─────────────────────────────────────────────────────── #}
   {% if screenshots %}
-  <div class="page">
-    <h1>Captured Screenshots</h1>
-    <p class="meta">Frames captured by the runner during each scenario.</p>
-    <div class="screenshots">
+  <section class="break">
+    <h2>Captured Screenshots</h2>
+    <p class="muted" style="font-size:9.5pt;margin:0;">Frames captured by the runner during each scenario.</p>
+    <div class="shots">
       {% for s in screenshots %}
       <div class="shot {{ 'failed' if s.status == 'failed' else '' }}">
-        {% if s.src %}<img src="{{ s.src }}" alt="{{ s.label }}" />{% else %}<div style="height:90pt;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:8pt;">[no image]</div>{% endif %}
+        {% if s.src %}<img src="{{ s.src }}" alt="{{ s.label }}" />{% else %}<div style="height:110pt;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:8pt;">no image</div>{% endif %}
         <div class="cap">
-          <span class="name">{{ s.label }}</span>
-          <span class="{{ 'bad' if s.status == 'failed' else 'ok' }}">{{ s.status }}</span>
+          <span>{{ s.label }}</span>
+          <span class="badge {{ 'bad' if s.status == 'failed' else 'ok' }}">{{ s.status }}</span>
         </div>
       </div>
       {% endfor %}
     </div>
-  </div>
+  </section>
   {% endif %}
 
-  {# ── Page 3: Raw log tail ─────────────────────────────────────────── #}
-  <div class="page">
-    <h1>Execution Log</h1>
-    <p class="meta">
-      Full log archived in the database. The last 200 lines are shown below;
-      download the full log from the dashboard for the complete trace.
-    </p>
-    <pre style="background:#0f172a;color:#e2e8f0;padding:12pt;border-radius:8pt;font-family:'JetBrains Mono',Menlo,monospace;font-size:8.5pt;line-height:1.5;white-space:pre-wrap;word-break:break-all;">
+  {# ── Execution log ───────────────────────────────────────────────────── #}
+  <section class="break">
+    <h2>Execution Log</h2>
+    <p class="muted" style="font-size:9.5pt;margin:0;">Last 200 lines. The full log is archived in the database and downloadable from the dashboard.</p>
+    <pre class="log">
 {%- set lines = (run.raw_log_text or '').splitlines() -%}
-{{ '\n'.join(lines[-200:]) }}
+{{ '\n'.join(lines[-200:]) if lines else 'No log output captured.' }}
     </pre>
-
-    <div class="footer">
-      <span>NextGen QA · {{ generated_at|fdt }}</span>
-      <span>Run {{ run.id }}</span>
-    </div>
-  </div>
+  </section>
 
 </body>
 </html>

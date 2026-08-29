@@ -99,17 +99,50 @@ async def render_run_pdf(
         generated_at=datetime.utcnow(),
     )
 
+    header_html, footer_html = _running_header_footer(str(run_id))
+
     # Render in a worker thread using sync Playwright so we don't depend on
     # the asyncio event loop supporting subprocesses (uvicorn on Windows
     # often hands us a Selector loop, which doesn't). Same pattern as the
     # dom_crawler.
-    await asyncio.to_thread(_render_pdf_sync, html, pdf_path)
+    await asyncio.to_thread(_render_pdf_sync, html, pdf_path, header_html, footer_html)
 
     logger.info("PDF written to %s", pdf_path)
     return str(pdf_path)
 
 
-def _render_pdf_sync(html: str, pdf_path: Path) -> None:
+def _running_header_footer(run_id: str) -> tuple[str, str]:
+    """Chromium header/footer templates rendered in the page margins on EVERY
+    page. Chromium substitutes the special classes (pageNumber/totalPages) and
+    requires an explicit font-size (its default is 0). Kept as tiny inline-styled
+    HTML — external CSS does not apply to these fragments."""
+    short_id = run_id[:8]
+    generated = _format_dt(datetime.utcnow())
+    base = (
+        "width:100%;font-size:8px;font-family:'Segoe UI',Helvetica,Arial,sans-serif;"
+        "color:#94a3b8;"
+    )
+    header = (
+        f'<div style="{base}padding:4px 14mm 0;">'
+        '<div style="display:flex;justify-content:space-between;align-items:center;'
+        'border-bottom:0.5px solid #e2e8f0;padding-bottom:4px;">'
+        '<span style="font-weight:700;color:#4f46e5;">NextGen QA</span>'
+        f'<span>Test Execution Report &middot; Run {short_id}</span>'
+        '</div></div>'
+    )
+    footer = (
+        f'<div style="{base}padding:0 14mm 4px;">'
+        '<div style="display:flex;justify-content:space-between;align-items:center;'
+        'border-top:0.5px solid #e2e8f0;padding-top:4px;">'
+        '<span>SLIIT &middot; R26-SE-039 &middot; Component 2</span>'
+        f'<span>Generated {generated}</span>'
+        '<span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>'
+        '</div></div>'
+    )
+    return header, footer
+
+
+def _render_pdf_sync(html: str, pdf_path: Path, header_html: str, footer_html: str) -> None:
     """Blocking PDF render in a worker thread."""
     from playwright.sync_api import sync_playwright
 
@@ -122,7 +155,11 @@ def _render_pdf_sync(html: str, pdf_path: Path) -> None:
                 path=str(pdf_path),
                 format="A4",
                 print_background=True,
-                margin={"top": "12mm", "right": "12mm", "bottom": "12mm", "left": "12mm"},
+                display_header_footer=True,
+                header_template=header_html,
+                footer_template=footer_html,
+                # Reserve space for the running header/footer in the margins.
+                margin={"top": "20mm", "right": "14mm", "bottom": "16mm", "left": "14mm"},
             )
         finally:
             browser.close()
