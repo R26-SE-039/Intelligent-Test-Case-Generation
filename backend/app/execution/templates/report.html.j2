@@ -45,19 +45,6 @@
     .tile .l { font-size: 8pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.5pt; margin-top: 2pt; }
     .tile.accent { background: #eef2ff; border-color: #c7d2fe; }
 
-    /* Donut + legend */
-    .cols { display: grid; grid-template-columns: 190pt 1fr; gap: 24pt; align-items: center; margin: 6pt 0; }
-    .donut { position: relative; width: 150pt; height: 150pt; margin: auto; }
-    .donut svg { transform: rotate(-90deg); }
-    .donut .pct {
-      position: absolute; inset: 0; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; line-height: 1;
-    }
-    .donut .pct .n { font-size: 24pt; font-weight: 700; line-height: 1; }
-    .donut .pct .t { font-size: 7.5pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.5pt; margin-top: 5pt; line-height: 1; }
-    .legend .row { display: flex; align-items: center; gap: 8pt; margin: 6pt 0; font-size: 10.5pt; }
-    .legend .sw { width: 10pt; height: 10pt; border-radius: 3pt; flex-shrink: 0; }
-
     /* Metadata table */
     .kv { width: 100%; border-collapse: collapse; font-size: 10pt; margin-top: 4pt; }
     .kv td { padding: 6pt 0; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
@@ -100,25 +87,6 @@
       <div class="tile"><div class="v" style="color:#dc2626;">{{ run.failed_count }}</div><div class="l">Failed</div></div>
     </div>
 
-    <div class="cols">
-      <div class="donut">
-        {% set radius = 62 %}
-        {% set circ = 2 * 3.14159 * radius %}
-        {% set passed_arc = circ * (run.passed_count / (run.total_count if run.total_count else 1)) %}
-        <svg width="150" height="150" viewBox="0 0 150 150">
-          <circle cx="75" cy="75" r="{{ radius }}" stroke="#fee2e2" stroke-width="16" fill="none" />
-          <circle cx="75" cy="75" r="{{ radius }}" stroke="#10b981" stroke-width="16" fill="none"
-                  stroke-dasharray="{{ passed_arc }} {{ circ }}" stroke-linecap="round" />
-        </svg>
-        <div class="pct"><span class="n">{{ pass_pct }}%</span></div>
-      </div>
-      <div class="legend">
-        <div class="row"><span class="sw" style="background:#10b981"></span><strong>{{ run.passed_count }}</strong>&nbsp;Passed scenarios</div>
-        <div class="row"><span class="sw" style="background:#ef4444"></span><strong>{{ run.failed_count }}</strong>&nbsp;Failed scenarios</div>
-        <div class="row"><span class="sw" style="background:#cbd5e1"></span><strong>{{ run.duration_ms|fdur }}</strong>&nbsp;Total duration</div>
-      </div>
-    </div>
-
     <h2>Pipeline Metadata</h2>
     <table class="kv">
       <tr><td class="k">Project ID</td><td><code>{{ run.project_id }}</code></td></tr>
@@ -131,6 +99,7 @@
       <tr><td class="k">Execution Mode</td><td>{{ run.mode }}{% if run.github_branch %} &middot; {{ run.github_branch }}{% endif %}</td></tr>
       <tr><td class="k">Started</td><td>{{ run.started_at|fdt }}</td></tr>
       <tr><td class="k">Finished</td><td>{{ run.finished_at|fdt }}</td></tr>
+      <tr><td class="k">Duration</td><td>{{ run.duration_ms|fdur }}</td></tr>
       {% if run.github_run_url %}
       <tr><td class="k">CI Run</td><td><code>{{ run.github_run_url }}</code></td></tr>
       {% endif %}
