@@ -163,6 +163,9 @@ is a FAILURE — aim to emit at least 3–5 scenarios per run.
 Critical rules:
   - Pick element IDs ONLY from the numbered red boxes you see in the screenshot.
   - One action per response.
+  - For a dropdown (a <select> element), use "fill" with the exact visible
+    option label as `value` (e.g. value="Price (low to high)"). Do NOT try to
+    click it open — the option is chosen directly.
   - Emit "discover_scenario" AS SOON AS you have seen enough to specify a journey
     — you do NOT need to fully execute it first. E.g. once you observe a product
     grid with add-to-cart buttons, you can already specify an "add item to cart"
@@ -366,6 +369,36 @@ def _state_hash(url: str, elements: list[dict]) -> str:
 
 # ─── Action execution ────────────────────────────────────────────────────────
 
+def _choose_select_option(locator, eid: int, sel: str, value: str) -> tuple[bool, str]:
+    """
+    Pick an option in a native <select>. The model typically supplies the
+    visible option label (e.g. "Price (low to high)"), but sometimes the value
+    attribute — try label, then value, then a case-insensitive partial match.
+    """
+    value = (value or "").strip()
+    if not value:
+        return False, f"element {eid} is a <select>; a target option value is required"
+
+    for kwargs in ({"label": value}, {"value": value}):
+        try:
+            locator.select_option(timeout=5000, **kwargs)
+            return True, f"selected '{value}' in element {eid} ({sel})"
+        except Exception:
+            continue
+
+    # Fallback: match against the actual option labels (handles partial/fuzzy text).
+    try:
+        options = locator.locator("option").all_inner_texts()
+        wanted = value.casefold()
+        for opt in options:
+            if wanted in opt.casefold():
+                locator.select_option(label=opt, timeout=5000)
+                return True, f"selected '{opt}' in element {eid} ({sel})"
+        return False, f"no option matching '{value}' in element {eid}; options: {options}"
+    except Exception as e:
+        return False, f"could not select '{value}' in element {eid}: {type(e).__name__}: {e}"
+
+
 def _exec_action(page, action: dict, elements: list[dict], log_event) -> tuple[bool, str]:
     """
     Run a Playwright action. Returns (success, message).
@@ -380,7 +413,12 @@ def _exec_action(page, action: dict, elements: list[dict], log_event) -> tuple[b
             eid = int(action.get("element_id") or 0)
             if eid not in by_id:
                 return False, f"No element with id {eid} in current SoM"
-            sel = by_id[eid]["selector"]
+            el = by_id[eid]
+            sel = el["selector"]
+            # A <select> can't be "clicked" to pick an option the way the model
+            # imagines — route to select_option when a target value is given.
+            if (el.get("tag") or "").lower() == "select" and action.get("value"):
+                return _choose_select_option(page.locator(sel).first, eid, sel, action["value"])
             page.locator(sel).first.click(timeout=5000)
             return True, f"clicked element {eid} ({sel})"
 
@@ -389,7 +427,12 @@ def _exec_action(page, action: dict, elements: list[dict], log_event) -> tuple[b
             value = action.get("value") or ""
             if eid not in by_id:
                 return False, f"No element with id {eid} in current SoM"
-            sel = by_id[eid]["selector"]
+            el = by_id[eid]
+            sel = el["selector"]
+            # Dropdowns are <select>, not text inputs — fill() raises on them.
+            # Translate a fill-on-select into the correct select_option call.
+            if (el.get("tag") or "").lower() == "select":
+                return _choose_select_option(page.locator(sel).first, eid, sel, value)
             page.locator(sel).first.fill(value, timeout=5000)
             return True, f"filled element {eid} ({sel}) with '{value}'"
 
