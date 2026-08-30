@@ -156,11 +156,22 @@ Action types you may emit:
                          (title + Given/When/Then steps in plain English)
   - "stop"             → exploration finished; coverage satisfied
 
+YOUR PRIMARY DELIVERABLE IS DISCOVERED TEST SCENARIOS. Exploring the page is
+only a means to that end. A run that ends with zero "discover_scenario" actions
+is a FAILURE — aim to emit at least 3–5 scenarios per run.
+
 Critical rules:
   - Pick element IDs ONLY from the numbered red boxes you see in the screenshot.
   - One action per response.
-  - When a sub-goal is validated by observation, emit "discover_scenario" THEN "complete_goal" in successive turns.
-  - Do not loop on a goal that already failed twice — write a lesson and move on.
+  - Emit "discover_scenario" AS SOON AS you have seen enough to specify a journey
+    — you do NOT need to fully execute it first. E.g. once you observe a product
+    grid with add-to-cart buttons, you can already specify an "add item to cart"
+    scenario. Emit scenarios AS YOU GO, not only at the very end.
+  - After validating a journey, emit "discover_scenario" THEN "complete_goal".
+  - Do NOT repeatedly click the same control that produces no visible change. If
+    two attempts yield nothing new, write a lesson, emit whatever scenario you
+    can from what you've already seen, and move to a different part of the page.
+  - Before you "stop", make sure you have emitted every scenario you can justify.
   - Output VALID JSON ONLY. No markdown fences, no commentary outside the JSON.
 """
 
@@ -246,6 +257,91 @@ Respond with EXACTLY this JSON shape:
     if not parsed:
         raise RuntimeError(f"Agent returned non-JSON response: {raw[:300]}")
     return parsed
+
+
+# ─── Scenario synthesis fallback ─────────────────────────────────────────────
+
+def _synthesize_scenarios_sync(
+    *,
+    intent: str,
+    history: list[dict],
+    elements: list[dict],
+    page_url: str,
+    page_title: str,
+    visited_states: int,
+) -> list[dict]:
+    """
+    Turn an exploration trace into concrete test scenarios.
+
+    Called when a run ends WITHOUT the agent having emitted any scenario itself,
+    so the results panel is never empty: the agent still visited real UI states,
+    and those are enough for a senior-QA model to write the scenarios worth
+    automating. Returns a list of {title, steps} dicts (possibly empty).
+    """
+    if not LLM_API_KEY:
+        return []
+
+    import httpx
+
+    hist_lines = "\n".join(
+        f"  step {h['step']}: {h['action_type']} on element {h.get('element_id', '-')} "
+        f"({'novel state' if h.get('novel') else 'known state'})"
+        for h in history
+    ) or "  (no steps recorded)"
+
+    el_lines = "\n".join(
+        f"  [{e['id']}] <{e.get('tag')}> {(e.get('text') or '')[:40]}"
+        for e in elements[:30]
+    ) or "  (none)"
+
+    system = (
+        "You are a senior QA engineer. Turn an autonomous agent's exploration "
+        "trace into concrete, automatable test scenarios in Given/When/Then form."
+    )
+    user = f"""An autonomous agent explored a web app for the QA intent below and visited {visited_states} distinct UI states, but did not formalize any scenarios. Using the intent, the action trace, and the elements on the final screen, write the test scenarios worth automating.
+
+# QA Intent
+{intent}
+
+# Final page
+URL: {page_url}
+Title: {page_title}
+
+# Action trace
+{hist_lines}
+
+# Elements on final screen
+{el_lines}
+
+Return ONLY JSON of this exact shape:
+{{ "scenarios": [ {{ "title": "...", "steps": ["Given ...", "When ...", "Then ..."] }} ] }}
+Write 3–6 scenarios covering happy path, negative, and edge cases relevant to the intent."""
+
+    payload = {
+        "model": VISION_MODEL,
+        "max_tokens": 1200,
+        "temperature": 0.3,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+
+    with httpx.Client(timeout=60) as client:
+        resp = client.post(
+            f"{OPENAI_BASE_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+            json=payload,
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(f"OpenAI API error {resp.status_code}: {resp.text[:200]}")
+
+    data = resp.json()
+    raw = (data.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
+    parsed = _parse_agent_json(raw)
+    scenarios = parsed.get("scenarios") if isinstance(parsed, dict) else None
+    return scenarios if isinstance(scenarios, list) else []
 
 
 # ─── State hashing for novelty detection ────────────────────────────────────
@@ -345,6 +441,43 @@ def _run_exploration_sync(
     state_set: set[str] = set()
     plateau = 0
     step = 0
+    # Kept fresh each iteration; also read by finish() for the synthesis fallback.
+    elements: list[dict] = []
+    page_url = start_url
+    page_title = ""
+
+    def finish(reason: str, brief: str) -> None:
+        """
+        Emit the terminal 'done' event. If the agent never formalized a scenario
+        itself, synthesize scenarios from the exploration trace first so the
+        results panel is never empty.
+        """
+        if not discovered:
+            emit("status",
+                 message="Run ended with no explicit scenarios — synthesizing from the exploration trace…",
+                 brief="synthesize")
+            try:
+                for sc in _synthesize_scenarios_sync(
+                    intent=intent,
+                    history=history,
+                    elements=elements,
+                    page_url=page_url,
+                    page_title=page_title,
+                    visited_states=len(state_set),
+                ):
+                    title = (sc.get("title") or "").strip() or f"Scenario {len(discovered) + 1}"
+                    steps = [str(s) for s in (sc.get("steps") or []) if str(s).strip()]
+                    if not steps:
+                        continue
+                    ds = DiscoveredScenario(title=title, steps=steps)
+                    discovered.append(ds)
+                    emit("scenario_discovered", title=title, steps=steps, step=step, synthesized=True)
+            except Exception as e:
+                emit("status", message=f"Scenario synthesis failed: {type(e).__name__}: {e}", brief="synth-fail")
+
+        emit("done", reason=reason,
+             total_steps=step, total_novel_states=len(state_set),
+             scenarios=[d.__dict__ for d in discovered], brief=brief)
 
     try:
         with sync_playwright() as p:
@@ -394,9 +527,7 @@ def _run_exploration_sync(
                          total_novel_states=len(state_set))
 
                     if plateau >= PLATEAU_LIMIT:
-                        emit("done", reason=f"coverage plateau ({PLATEAU_LIMIT} steps without novel state)",
-                             total_steps=step, total_novel_states=len(state_set),
-                             scenarios=[d.__dict__ for d in discovered], brief="plateau")
+                        finish(f"coverage plateau ({PLATEAU_LIMIT} steps without novel state)", "plateau")
                         return
 
                     # 4. Ask the agent for next action.
@@ -435,9 +566,7 @@ def _run_exploration_sync(
 
                     # Meta actions: don't hit the page; just bookkeep.
                     if atype == "stop":
-                        emit("done", reason="agent emitted stop",
-                             total_steps=step, total_novel_states=len(state_set),
-                             scenarios=[d.__dict__ for d in discovered], brief="stop")
+                        finish("agent emitted stop", "stop")
                         return
 
                     if atype == "discover_scenario":
@@ -490,9 +619,7 @@ def _run_exploration_sync(
                         pass
 
                 # Hit max_steps.
-                emit("done", reason=f"reached max_steps={max_steps}",
-                     total_steps=step, total_novel_states=len(state_set),
-                     scenarios=[d.__dict__ for d in discovered], brief="maxsteps")
+                finish(f"reached max_steps={max_steps}", "maxsteps")
             finally:
                 browser.close()
     except Exception as e:
