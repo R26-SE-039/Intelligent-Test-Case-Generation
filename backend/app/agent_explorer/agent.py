@@ -8,8 +8,9 @@ Pipeline per iteration:
   3. Take a SECOND screenshot — that one goes to the vision model.
   4. Build the agent prompt: original intent, sub-goal queue, recent history,
      reflexion lessons, the SoM screenshot.
-  5. Claude Sonnet 4.6 (vision) returns a single JSON with four role-tagged
-     thoughts (planner/actor/observer/critic) and an action.
+  5. A vision LLM (OpenAI gpt-4o-mini by default, via LLM_MODEL) returns a
+     single JSON with four role-tagged thoughts
+     (planner/actor/observer/critic) and an action.
   6. Execute the action via Playwright.
   7. Compute a state hash; if novel, record it. Drives coverage + termination.
   8. Stream every step to the broker so the UI sees it live.
@@ -56,11 +57,13 @@ class DiscoveredScenario:
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
-ANTHROPIC_API_KEY = os.getenv("LLM_API_KEY", "")
-# Use Sonnet 4.6 with vision — Sonnet 4.7 is the latest non-vision-confirmed
-# tier in this stack so we pin to 4.6 for vision reliability. If 4.7 vision
-# rolls out generally, swap LLM_MODEL in .env.
-VISION_MODEL = os.getenv("AGENT_VISION_MODEL", "claude-sonnet-4-6")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+# The agent needs a VISION-capable model (it reasons over screenshots). The rest
+# of the backend is driven by LLM_PROVIDER/LLM_MODEL; the default `gpt-4o-mini`
+# is vision-capable, so the agent runs on the same OpenAI key as everything else.
+# Override with AGENT_VISION_MODEL in .env if you want a different vision model.
+VISION_MODEL = os.getenv("AGENT_VISION_MODEL", os.getenv("LLM_MODEL", "gpt-4o-mini"))
+OPENAI_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
 MAX_STEPS_DEFAULT = 12        # Hard cap so demo never runs forever.
 PLATEAU_LIMIT = 3             # Stop when this many consecutive steps add no novel state.
 HISTORY_WINDOW = 6            # How many past actions/observations to feed back into the prompt.
@@ -107,18 +110,12 @@ def _call_vision_llm_sync(
     page_title: str,
 ) -> dict:
     """
-    Single Anthropic call. The prompt frames the model as four roles
+    Single OpenAI (vision) call. The prompt frames the model as four roles
     (planner / actor / observer / critic) so the dissertation can describe
     it as a multi-role architecture without paying 4× tokens.
     """
-    if not ANTHROPIC_API_KEY:
+    if not LLM_API_KEY:
         raise RuntimeError("LLM_API_KEY not set in backend/.env — agent cannot run.")
-
-    # Defer the import so the module loads even if the package isn't installed
-    # yet (clearer error in /docs than ImportError on first request).
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     # Compact the element list — full attribute dump blows the token budget fast.
     el_lines = []
@@ -207,24 +204,44 @@ Respond with EXACTLY this JSON shape:
 }}
 """
 
-    resp = client.messages.create(
-        model=VISION_MODEL,
-        max_tokens=1500,
-        system=system,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": "image/png", "data": screenshot_b64},
-                },
-                {"type": "text", "text": user_text},
-            ],
-        }],
-    )
+    # OpenAI chat-completions with vision. httpx (sync) is already a dependency
+    # and matches the OpenAI path in app/gherkin/generator.py — no SDK needed.
+    import httpx
 
-    # Concatenate all text blocks just in case Claude emits multiple.
-    raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+    with httpx.Client(timeout=60) as client:
+        resp = client.post(
+            f"{OPENAI_BASE_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+            json={
+                "model": VISION_MODEL,
+                "max_tokens": 1500,
+                "temperature": 0.2,
+                # Force a JSON object back so parsing never depends on the model
+                # obeying the "no fences" instruction.
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {"role": "system", "content": system},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_text},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"},
+                            },
+                        ],
+                    },
+                ],
+            },
+        )
+
+    if resp.status_code != 200:
+        # Surface the provider's error verbatim so the UI shows a real reason
+        # (401 invalid key, 404 unknown model, 429 rate limit, …).
+        raise RuntimeError(f"OpenAI API error {resp.status_code}: {resp.text[:300]}")
+
+    data = resp.json()
+    raw = (data.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
     parsed = _parse_agent_json(raw)
     if not parsed:
         raise RuntimeError(f"Agent returned non-JSON response: {raw[:300]}")
