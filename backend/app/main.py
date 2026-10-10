@@ -25,6 +25,7 @@ from app.execution import log_broker as execution_log_broker
 from app.execution.routes import router as execution_router, register_execution_websocket
 from app.github_connection.routes import router as github_connection_router
 from app.integration.routes import router as integration_router
+from app.validation.routes import router as validation_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -82,6 +83,7 @@ app.include_router(agent_router)
 app.include_router(execution_router)
 app.include_router(github_connection_router)
 app.include_router(integration_router)
+app.include_router(validation_router)
 register_agent_websocket(app)
 register_execution_websocket(app)
 
