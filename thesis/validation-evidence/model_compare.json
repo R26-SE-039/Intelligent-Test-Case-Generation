@@ -1,0 +1,756 @@
+{
+ "suite": {
+  "id": "020ae0fc-7c0e-45d7-8e56-d6d2c8304d2d",
+  "framework": "playwright",
+  "version": 28,
+  "mode": "dom",
+  "lines": 91
+ },
+ "execution": {
+  "id": "9752a8c4-9759-4863-955a-a9eb4dc33b66",
+  "mode": "local",
+  "passed": 8,
+  "failed": 0,
+  "total": 8,
+  "at": "2026-09-17 14:19:19.451593+00:00"
+ },
+ "actual": {
+  "test_successfully_remove_product_from_cart": "passed",
+  "test_attempt_to_remove_a_product_not_in_cart": "passed",
+  "test_successfully_add_product_to_cart": "passed",
+  "test_attempt_to_add_a_product_when_already_in_cart": "passed",
+  "test_successful_login_with_valid_credentials": "passed",
+  "test_failed_login_with_invalid_credentials": "passed",
+  "test_successful_checkout_with_all_details": "passed",
+  "test_checkout_with_missing_postal_code": "passed"
+ },
+ "static_score": 87,
+ "static_findings": [
+  [
+   "major",
+   "Scenario has no implementing test"
+  ],
+  [
+   "minor",
+   "Selectors not in crawled element map"
+  ]
+ ],
+ "models": {
+  "gpt-4o-mini": [
+   {
+    "duration_s": 18.1,
+    "pass_probability": 60,
+    "score": 59,
+    "verdict": "needs_review",
+    "predicted_pass_rate": 38,
+    "matched": 7,
+    "correct": 3,
+    "uncertain": 0,
+    "accuracy": 43,
+    "findings": [
+     [
+      "major",
+      "No test for verifying cart badge absence"
+     ],
+     [
+      "major",
+      "Unverified selectors for login elements"
+     ],
+     [
+      "major",
+      "Unverified selector for cart badge"
+     ],
+     [
+      "major",
+      "Unverified selector for summary info"
+     ]
+    ],
+    "scenarios": [
+     {
+      "title": "Successfully remove product from cart",
+      "test": "test_successfully_remove_product_from_cart",
+      "predicted": "fail",
+      "confidence": 70,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Attempt to remove product when cart is empty",
+      "test": "test_attempt_to_remove_a_product_not_in_cart",
+      "predicted": "pass",
+      "confidence": 80,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successfully add product to cart",
+      "test": "test_successfully_add_product_to_cart",
+      "predicted": "fail",
+      "confidence": 60,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Successful login with valid credentials",
+      "test": "test_successful_login_with_valid_credentials",
+      "predicted": "fail",
+      "confidence": 50,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Failed login with invalid credentials",
+      "test": "test_failed_login_with_invalid_credentials",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful checkout with all details",
+      "test": "test_successful_checkout_with_all_details",
+      "predicted": "fail",
+      "confidence": 60,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Checkout with missing postal code",
+      "test": "test_checkout_with_missing_postal_code",
+      "predicted": "pass",
+      "confidence": 80,
+      "actual": "passed",
+      "correct": true
+     }
+    ]
+   },
+   {
+    "duration_s": 15.0,
+    "pass_probability": 40,
+    "score": 40,
+    "verdict": "likely_failing",
+    "predicted_pass_rate": 25,
+    "matched": 7,
+    "correct": 2,
+    "uncertain": 0,
+    "accuracy": 29,
+    "findings": [
+     [
+      "critical",
+      "Missing test for verifying cart badge absence"
+     ],
+     [
+      "major",
+      "Unverified selectors in login tests"
+     ],
+     [
+      "major",
+      "Unverified selector in remove product test"
+     ],
+     [
+      "major",
+      "Unverified selector in checkout tests"
+     ]
+    ],
+    "scenarios": [
+     {
+      "title": "Successfully remove product from cart",
+      "test": "test_successfully_remove_product_from_cart",
+      "predicted": "fail",
+      "confidence": 80,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Attempt to remove product when cart is empty",
+      "test": "test_attempt_to_remove_a_product_not_in_cart",
+      "predicted": "fail",
+      "confidence": 70,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Successfully add product to cart",
+      "test": "test_successfully_add_product_to_cart",
+      "predicted": "fail",
+      "confidence": 70,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Successful login with valid credentials",
+      "test": "test_successful_login_with_valid_credentials",
+      "predicted": "fail",
+      "confidence": 80,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Failed login with invalid credentials",
+      "test": "test_failed_login_with_invalid_credentials",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful checkout with all details",
+      "test": "test_successful_checkout_with_all_details",
+      "predicted": "fail",
+      "confidence": 70,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Checkout with missing postal code",
+      "test": "test_checkout_with_missing_postal_code",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     }
+    ]
+   }
+  ],
+  "gpt-4o": [
+   {
+    "duration_s": 10.7,
+    "pass_probability": 85,
+    "score": 82,
+    "verdict": "needs_review",
+    "predicted_pass_rate": 75,
+    "matched": 7,
+    "correct": 6,
+    "uncertain": 0,
+    "accuracy": 86,
+    "findings": [
+     [
+      "major",
+      "Missing test for cart badge not displayed"
+     ],
+     [
+      "major",
+      "Incorrect postal code handling in checkout"
+     ],
+     [
+      "minor",
+      "Fragile conditional check for product removal"
+     ]
+    ],
+    "scenarios": [
+     {
+      "title": "Successfully remove product from cart",
+      "test": "test_successfully_remove_product_from_cart",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Attempt to remove product when cart is empty",
+      "test": "test_attempt_to_remove_a_product_not_in_cart",
+      "predicted": "pass",
+      "confidence": 85,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successfully add product to cart",
+      "test": "test_successfully_add_product_to_cart",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful login with valid credentials",
+      "test": "test_successful_login_with_valid_credentials",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Failed login with invalid credentials",
+      "test": "test_failed_login_with_invalid_credentials",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful checkout with all details",
+      "test": "test_successful_checkout_with_all_details",
+      "predicted": "fail",
+      "confidence": 80,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Checkout with missing postal code",
+      "test": "test_checkout_with_missing_postal_code",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     }
+    ]
+   },
+   {
+    "duration_s": 16.4,
+    "pass_probability": 85,
+    "score": 82,
+    "verdict": "needs_review",
+    "predicted_pass_rate": 75,
+    "matched": 7,
+    "correct": 6,
+    "uncertain": 0,
+    "accuracy": 86,
+    "findings": [
+     [
+      "major",
+      "Missing test for cart badge not displayed"
+     ],
+     [
+      "major",
+      "Incorrect checkout scenario implementation"
+     ],
+     [
+      "minor",
+      "Fragile conditional check"
+     ]
+    ],
+    "scenarios": [
+     {
+      "title": "Successfully remove product from cart",
+      "test": "test_successfully_remove_product_from_cart",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Attempt to remove product when cart is empty",
+      "test": "test_attempt_to_remove_a_product_not_in_cart",
+      "predicted": "pass",
+      "confidence": 85,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successfully add product to cart",
+      "test": "test_successfully_add_product_to_cart",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful login with valid credentials",
+      "test": "test_successful_login_with_valid_credentials",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Failed login with invalid credentials",
+      "test": "test_failed_login_with_invalid_credentials",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful checkout with all details",
+      "test": "test_successful_checkout_with_all_details",
+      "predicted": "fail",
+      "confidence": 80,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Checkout with missing postal code",
+      "test": "test_checkout_with_missing_postal_code",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     }
+    ]
+   }
+  ],
+  "gpt-4.1-mini": [
+   {
+    "duration_s": 16.8,
+    "pass_probability": 70,
+    "score": 71,
+    "verdict": "needs_review",
+    "predicted_pass_rate": 62,
+    "matched": 7,
+    "correct": 5,
+    "uncertain": 0,
+    "accuracy": 71,
+    "findings": [
+     [
+      "major",
+      "Missing test for cart badge absence when no products added"
+     ],
+     [
+      "major",
+      "Checkout with all details test fills postal code contrary to scenario"
+     ],
+     [
+      "major",
+      "Checkout missing postal code test lacks assertion for remaining on info page"
+     ],
+     [
+      "minor",
+      "Selectors #user-name, #password, #login-button not in crawled map"
+     ],
+     [
+      "minor",
+      "Use of inner_text() without await or wait"
+     ]
+    ],
+    "scenarios": [
+     {
+      "title": "Successfully remove product from cart",
+      "test": "test_successfully_remove_product_from_cart",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Attempt to remove product when cart is empty",
+      "test": "test_attempt_to_remove_a_product_not_in_cart",
+      "predicted": "pass",
+      "confidence": 85,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successfully add product to cart",
+      "test": "test_successfully_add_product_to_cart",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful login with valid credentials",
+      "test": "test_successful_login_with_valid_credentials",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Failed login with invalid credentials",
+      "test": "test_failed_login_with_invalid_credentials",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful checkout with all details",
+      "test": "test_successful_checkout_with_all_details",
+      "predicted": "fail",
+      "confidence": 80,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Checkout with missing postal code",
+      "test": "test_checkout_with_missing_postal_code",
+      "predicted": "fail",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": false
+     }
+    ]
+   },
+   {
+    "duration_s": 17.3,
+    "pass_probability": 70,
+    "score": 75,
+    "verdict": "needs_review",
+    "predicted_pass_rate": 75,
+    "matched": 7,
+    "correct": 6,
+    "uncertain": 0,
+    "accuracy": 86,
+    "findings": [
+     [
+      "major",
+      "Missing test for cart badge absence when no products added"
+     ],
+     [
+      "major",
+      "Checkout with all details test does not match scenario"
+     ],
+     [
+      "minor",
+      "Login page selectors not in crawled map"
+     ],
+     [
+      "minor",
+      "Shopping cart badge selector not in crawled map"
+     ]
+    ],
+    "scenarios": [
+     {
+      "title": "Successfully remove product from cart",
+      "test": "test_successfully_remove_product_from_cart",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Attempt to remove product when cart is empty",
+      "test": "test_attempt_to_remove_a_product_not_in_cart",
+      "predicted": "pass",
+      "confidence": 85,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successfully add product to cart",
+      "test": "test_successfully_add_product_to_cart",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful login with valid credentials",
+      "test": "test_successful_login_with_valid_credentials",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Failed login with invalid credentials",
+      "test": "test_failed_login_with_invalid_credentials",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful checkout with all details",
+      "test": "test_successful_checkout_with_all_details",
+      "predicted": "fail",
+      "confidence": 80,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Checkout with missing postal code",
+      "test": "test_checkout_with_missing_postal_code",
+      "predicted": "pass",
+      "confidence": 85,
+      "actual": "passed",
+      "correct": true
+     }
+    ]
+   }
+  ],
+  "gpt-4.1": [
+   {
+    "duration_s": 19.3,
+    "pass_probability": 85,
+    "score": 75,
+    "verdict": "needs_review",
+    "predicted_pass_rate": 50,
+    "matched": 7,
+    "correct": 4,
+    "uncertain": 2,
+    "accuracy": 57,
+    "findings": [
+     [
+      "major",
+      "Scenario not implemented"
+     ],
+     [
+      "major",
+      "Checkout scenario does not match Gherkin intent"
+     ],
+     [
+      "major",
+      "Test does not verify product absence in cart"
+     ],
+     [
+      "major",
+      "Test does not verify product presence in cart"
+     ],
+     [
+      "minor",
+      "Potentially fragile assertion for badge absence"
+     ],
+     [
+      "minor",
+      "Potentially fragile assertion for badge absence"
+     ]
+    ],
+    "scenarios": [
+     {
+      "title": "Successfully remove product from cart",
+      "test": "test_successfully_remove_product_from_cart",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Attempt to remove product when cart is empty",
+      "test": "test_attempt_to_remove_a_product_not_in_cart",
+      "predicted": "uncertain",
+      "confidence": 60,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Successfully add product to cart",
+      "test": "test_successfully_add_product_to_cart",
+      "predicted": "uncertain",
+      "confidence": 70,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Successful login with valid credentials",
+      "test": "test_successful_login_with_valid_credentials",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Failed login with invalid credentials",
+      "test": "test_failed_login_with_invalid_credentials",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful checkout with all details",
+      "test": "test_successful_checkout_with_all_details",
+      "predicted": "fail",
+      "confidence": 40,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Checkout with missing postal code",
+      "test": "test_checkout_with_missing_postal_code",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     }
+    ]
+   },
+   {
+    "duration_s": 15.5,
+    "pass_probability": 85,
+    "score": 82,
+    "verdict": "needs_review",
+    "predicted_pass_rate": 75,
+    "matched": 7,
+    "correct": 6,
+    "uncertain": 0,
+    "accuracy": 86,
+    "findings": [
+     [
+      "major",
+      "Scenario not implemented"
+     ],
+     [
+      "major",
+      "Checkout test leaves postal code empty"
+     ],
+     [
+      "minor",
+      "Cart removal test does not check cart contents"
+     ],
+     [
+      "minor",
+      "Cart empty removal test does not check cart contents"
+     ],
+     [
+      "minor",
+      "Potential race condition on badge visibility"
+     ],
+     [
+      "info",
+      "Selectors are verified by application facts"
+     ]
+    ],
+    "scenarios": [
+     {
+      "title": "Successfully remove product from cart",
+      "test": "test_successfully_remove_product_from_cart",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Attempt to remove product when cart is empty",
+      "test": "test_attempt_to_remove_a_product_not_in_cart",
+      "predicted": "pass",
+      "confidence": 90,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successfully add product to cart",
+      "test": "test_successfully_add_product_to_cart",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful login with valid credentials",
+      "test": "test_successful_login_with_valid_credentials",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Failed login with invalid credentials",
+      "test": "test_failed_login_with_invalid_credentials",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     },
+     {
+      "title": "Successful checkout with all details",
+      "test": "test_successful_checkout_with_all_details",
+      "predicted": "fail",
+      "confidence": 60,
+      "actual": "passed",
+      "correct": false
+     },
+     {
+      "title": "Checkout with missing postal code",
+      "test": "test_checkout_with_missing_postal_code",
+      "predicted": "pass",
+      "confidence": 95,
+      "actual": "passed",
+      "correct": true
+     }
+    ]
+   }
+  ]
+ }
+}
