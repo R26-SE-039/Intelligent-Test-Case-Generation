@@ -140,3 +140,5 @@ On the EC2 deployment the same variables go into the server's `backend/.env`.
 
 `backend/tests/test_validation_static.py` — 21 unit tests covering the Gherkin parser,
 every static rule, selector extraction, scoring and caps. No LLM or database is needed.
+
+//
