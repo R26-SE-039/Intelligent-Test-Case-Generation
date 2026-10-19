@@ -8,6 +8,7 @@ Tables:
   - test_suites       : persisted LLM-generated test code, one row per (project, framework)
   - dom_elements      : selectors extracted from the live staging DOM, editable by QA
   - test_runs         : execution log of each test scenario, used as labels for ML risk prediction
+  - validation_reports: independent validation passes (static checks + LLM judge) over suites/Gherkin
 """
 
 from sqlalchemy import (
@@ -346,3 +347,55 @@ class ProjectGitHubConnection(Base):
     last_validated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ValidationReport(Base):
+    """
+    One row per independent validation pass over a generated artefact.
+
+    `target_type` is "suite" (a TestSuite row) or "gherkin" (a GherkinScenario
+    row). `content_hash` fingerprints the exact text that was validated so the
+    UI can tell whether the latest report still describes the current code.
+
+    The report combines two independent signals (see app/validation/service.py):
+      - deterministic static checks (syntax, scenario coverage, selector
+        grounding, CI constraints) — no LLM involved;
+      - an LLM judge that did NOT author the artefact (configurable to a
+        different provider/model via VALIDATOR_* env vars) predicting, per
+        scenario, whether the test will pass when executed.
+
+    `parent_report_id` links a re-validation that followed an auto-fix to the
+    report that triggered the fix, so before/after scores can be shown.
+    """
+    __tablename__ = "validation_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    target_type = Column(String(20), nullable=False, index=True)    # suite | gherkin
+    target_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    content_hash = Column(String(64), nullable=False)
+    framework = Column(String(40), nullable=True)
+
+    score = Column(Integer, nullable=False, default=0)               # headline 0..100
+    verdict = Column(String(20), nullable=False, default="unknown")  # ready | needs_review | likely_failing
+    static_score = Column(Integer, nullable=False, default=0)
+    llm_score = Column(Integer, nullable=True)                       # judge's holistic probability
+    scenario_total = Column(Integer, nullable=False, default=0)
+    scenario_pass_predicted = Column(Integer, nullable=False, default=0)
+
+    summary = Column(Text, nullable=True)
+    findings = Column(JSONB, nullable=False, default=list)
+    scenarios = Column(JSONB, nullable=False, default=list)
+    breakdown = Column(JSONB, nullable=False, default=dict)          # how the score was computed
+
+    validator_provider = Column(String(40), nullable=True)
+    validator_model = Column(String(100), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    parent_report_id = Column(UUID(as_uuid=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
